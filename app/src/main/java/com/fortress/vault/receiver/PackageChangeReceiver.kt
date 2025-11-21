@@ -45,6 +45,14 @@ class PackageChangeReceiver : BroadcastReceiver() {
         val blocksNewApps = ControlManager.activeLocks(context).any {
             it.control == DeviceControl.APP_INSTALLS && ControlManager.remainingMillis(context, it) > 0
         }
+        if (packageName != "com.android.chrome" &&
+            WebProtectionManager.isChromeOnlyBlockedPackage(context, packageName)
+        ) {
+            Log.i("PackageChangeReceiver", "Chrome-only protection blocked new package $packageName")
+            PackageFreezer.quarantineNewPackage(context, packageName)
+            PackageFreezer.uninstallNewPackage(context, packageName)
+            enqueueReinforcement(context, packageName)
+        }
         val isSealedPackage = packageName in VaultManager.blockedPackages(context)
         if (!isSealedPackage && !(blocksNewApps && isNewInstall)) return
 
