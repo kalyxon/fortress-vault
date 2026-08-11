@@ -23,27 +23,27 @@ device and Android version you plan to use.
 
 ### Setup
 
-![Setup screen](public/screenshot_20260811_210517.png)
+<img src="public/screenshot_20260811_210517.png" alt="Setup screen" width="280">
 
 ### Choose apps and set the duration
 
-![App selection screen](public/screenshot_20260811_210527.png)
-![Duration screen](public/screenshot_20260811_210534.png)
+<img src="public/screenshot_20260811_210527.png" alt="App selection screen" width="280">
+<img src="public/screenshot_20260811_210534.png" alt="Duration screen" width="280">
 
 ### Recovery phrase
 
-![Recovery phrase screen](public/screenshot_20260811_210601.png)
+<img src="public/screenshot_20260811_210601.png" alt="Recovery phrase screen" width="280">
 
 ### Vault status
 
-![Vault status screen](public/screenshot_20260811_210608.png)
-![Sealed vault screen](public/screenshot_20260811_210708.png)
+<img src="public/screenshot_20260811_210608.png" alt="Vault status screen" width="280">
+<img src="public/screenshot_20260811_210708.png" alt="Sealed vault screen" width="280">
 
 ### Emergency unlock
 
-![Emergency unlock screen](public/screenshot_20260811_210803.png)
-![Emergency unlock code screen](public/screenshot_20260811_210808.png)
-![Emergency unlock result](public/screenshot_20260811_211129.png)
+<img src="public/screenshot_20260811_210803.png" alt="Emergency unlock screen" width="280">
+<img src="public/screenshot_20260811_210808.png" alt="Emergency unlock code screen" width="280">
+<img src="public/screenshot_20260811_211129.png" alt="Emergency unlock result" width="280">
 
 ## Requirements
 
