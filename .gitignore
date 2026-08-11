@@ -1,0 +1,28 @@
+# Gradle
+.gradle/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android Studio and IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Local machine configuration
+local.properties
+
+# Generated Android files
+.externalNativeBuild/
+.cxx/
+captures/
+output-metadata.json
+
+# Signing and private configuration
+*.jks
+*.keystore
+keystore.properties
+
+# OS files
+.DS_Store
+Thumbs.db
