@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.FortressVault" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/obsidian_black</item>
+        <item name="android:statusBarColor">@color/obsidian_black</item>
+        <item name="android:navigationBarColor">@color/obsidian_black</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
