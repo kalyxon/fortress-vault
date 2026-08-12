@@ -6,6 +6,11 @@ import android.content.Intent
 import com.fortress.vault.core.PackageFreezer
 import com.fortress.vault.core.VaultManager
 
+/**
+ * Fires on ACTION_PACKAGE_ADDED / ACTION_PACKAGE_REPLACED. If the newly
+ * (re)installed package is on the sealed block list, freeze it before the
+ * user even gets to the home screen with a working icon.
+ */
 class PackageChangeReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {

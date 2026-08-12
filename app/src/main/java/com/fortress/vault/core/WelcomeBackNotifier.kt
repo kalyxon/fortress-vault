@@ -11,6 +11,7 @@ import com.fortress.vault.FortressApplication
 import com.fortress.vault.MainActivity
 import com.fortress.vault.R
 
+
 object WelcomeBackNotifier {
 
     private const val NOTIFICATION_ID = 2001
@@ -31,17 +32,12 @@ object WelcomeBackNotifier {
         val notification = NotificationCompat.Builder(context, FortressApplication.SENTINEL_CHANNEL_ID)
             .setContentTitle("Welcome back")
             .setContentText(reason)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(welcomeBody(reason)))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(reason))
             .setSmallIcon(R.drawable.ic_shield)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()
 
         NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
-    }
-
-    private fun welcomeBody(reason: String): String = when (reason) {
-        "Sentence complete" -> "Your sentence is complete. Everything you sealed is unfrozen."
-        else -> reason
     }
 }

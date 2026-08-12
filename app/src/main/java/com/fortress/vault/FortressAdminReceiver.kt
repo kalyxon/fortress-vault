@@ -27,7 +27,7 @@ class FortressAdminReceiver : DeviceAdminReceiver() {
     override fun onDisabled(context: Context, intent: Intent) {
         super.onDisabled(context, intent)
         // If we ever legitimately reach here (vault unsealed), clean up.
-        VaultManager.onAdminDisabled(context)
+        VaultManager.onAdminDisabled()
     }
 
     companion object {
