@@ -27,12 +27,13 @@ private const val ADB_COMMAND =
     "adb shell dpm set-device-owner com.fortress.vault/.FortressAdminReceiver"
 
 @Composable
-fun SetupScreen(onDeviceOwnerConfirmed: (String) -> Unit) {
+fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
     var showNotYetGrantedError by remember { mutableStateOf(false) }
-    var organizationName by remember { mutableStateOf("") }
+    var orgName by remember { mutableStateOf("") }
+    var showOrgNameError by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -60,18 +61,24 @@ fun SetupScreen(onDeviceOwnerConfirmed: (String) -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
         OutlinedTextField(
-            value = organizationName,
-            onValueChange = {
-                organizationName = it
-                showNotYetGrantedError = false
-            },
-            label = { Text("Name shown on the lock screen") },
-            placeholder = { Text("For example, My Focus Device") },
-            supportingText = { Text("Android will show this name in its device management notice.") },
-            singleLine = true,
+            value = orgName,
+            onValueChange = { orgName = it; showOrgNameError = false },
+            label = { Text("Organization name") },
+            placeholder = { Text("Your organization (shown by Android)") },
             modifier = Modifier.fillMaxWidth()
+        )
+        if (showOrgNameError) {
+            Spacer(Modifier.height(8.dp))
+            Text("Please enter a non-empty organization name.", color = MaterialTheme.colorScheme.error)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "This name is used by Android when this app is Device Owner. " +
+                "The system may show: 'This device belongs to <Organization>' on the lock screen and in admin UI.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(Modifier.height(28.dp))
@@ -120,7 +127,10 @@ fun SetupScreen(onDeviceOwnerConfirmed: (String) -> Unit) {
         SetupStep(
             number = 4,
             title = "Confirm",
-            description = "Once the command succeeds, come back here and tap below."
+            description = "Once the command succeeds, come back here and tap below. " +
+                "Reminder: sealing doesn't turn off USB debugging by itself — if you plan to " +
+                "seal something and want it to actually hold against a connected computer, " +
+                "turn off USB debugging yourself first (Developer options → USB debugging)."
         )
 
         Spacer(Modifier.height(24.dp))
@@ -136,13 +146,25 @@ fun SetupScreen(onDeviceOwnerConfirmed: (String) -> Unit) {
         Button(
             onClick = {
                 val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                if (organizationName.trim().isEmpty()) {
+                if (!dpm.isDeviceOwnerApp(context.packageName)) {
                     showNotYetGrantedError = true
-                } else if (dpm.isDeviceOwnerApp(context.packageName)) {
-                    onDeviceOwnerConfirmed(organizationName.trim())
-                } else {
-                    showNotYetGrantedError = true
+                    return@Button
                 }
+                if (orgName.isBlank()) {
+                    showOrgNameError = true
+                    return@Button
+                }
+
+                // Apply organization name now that we're device owner and the
+                // user provided a non-empty name, then proceed.
+                try {
+                    val admin = com.fortress.vault.FortressAdminReceiver.getComponentName(context)
+                    dpm.setOrganizationName(admin, orgName)
+                } catch (_: Exception) {
+                    // Best-effort: failures here shouldn't block setup progression.
+                }
+
+                onDeviceOwnerConfirmed()
             },
             colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary),
             modifier = Modifier.fillMaxWidth().height(52.dp)
