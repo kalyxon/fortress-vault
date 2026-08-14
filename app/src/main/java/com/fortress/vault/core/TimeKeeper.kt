@@ -9,11 +9,6 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * Falls back to the last known-good time + elapsed boot time when offline,
- * per SystemClock.elapsedRealtime() which is monotonic and NOT affected by
- * the user changing the wall clock.
- */
 object TimeKeeper {
 
     private const val TIME_SOURCE_URL = "https://www.google.com"
@@ -27,10 +22,24 @@ object TimeKeeper {
             persistSyncPoint(context, networkTime)
             networkTime
         } catch (e: Exception) {
-            // Offline fallback: extrapolate from last confirmed sync using the
-            // monotonic elapsed-realtime clock, which survives wall-clock edits.
-            estimateFromLastSync(context)
+            estimateCurrentTrustedTimeMillis(context)
         }
+    }
+
+    fun estimateCurrentTrustedTimeMillis(context: Context): Long {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val lastReal = prefs.getLong(KEY_LAST_SYNC_REAL_MILLIS, -1L)
+        val lastElapsed = prefs.getLong(KEY_LAST_SYNC_ELAPSED_REALTIME, -1L)
+
+        if (lastReal == -1L) {
+            // Never synced even once (e.g. sealed with zero connectivity ever).
+            // Only real fallback is the wall clock — mitigated by requiring a
+            // successful sync before seal creation is allowed to complete.
+            return System.currentTimeMillis()
+        }
+
+        val elapsedSinceSync = android.os.SystemClock.elapsedRealtime() - lastElapsed
+        return lastReal + elapsedSinceSync
     }
 
     private fun fetchFromHttpHeader(): Long {
@@ -57,22 +66,5 @@ object TimeKeeper {
             .putLong(KEY_LAST_SYNC_REAL_MILLIS, networkTimeMillis)
             .putLong(KEY_LAST_SYNC_ELAPSED_REALTIME, android.os.SystemClock.elapsedRealtime())
             .apply()
-    }
-
-    private fun estimateFromLastSync(context: Context): Long {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val lastReal = prefs.getLong(KEY_LAST_SYNC_REAL_MILLIS, -1L)
-        val lastElapsed = prefs.getLong(KEY_LAST_SYNC_ELAPSED_REALTIME, -1L)
-
-        if (lastReal == -1L) {
-            // Never synced even once (e.g. sealed with no connectivity at all).
-            // Best-effort fallback to wall clock; this is the one edge case
-            // where a pre-seal clock change could shave time off — mitigate
-            // by requiring a successful sync before seal() is allowed to complete.
-            return System.currentTimeMillis()
-        }
-
-        val elapsedSinceSync = android.os.SystemClock.elapsedRealtime() - lastElapsed
-        return lastReal + elapsedSinceSync
     }
 }

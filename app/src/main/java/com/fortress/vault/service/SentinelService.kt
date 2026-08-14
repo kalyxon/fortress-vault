@@ -16,11 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
-/**
- * Persistent foreground service — the "always-on guard." Device Owner status
- * prevents the user from force-stopping this from Settings. If the OS itself
- * kills it under memory pressure, SentinelWorker (WorkManager) resurrects it.
- */
+
 class SentinelService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
@@ -56,9 +52,16 @@ class SentinelService : Service() {
             android.app.PendingIntent.FLAG_IMMUTABLE
         )
 
+        val seals = VaultManager.activeSeals(applicationContext)
+        val text = when (seals.size) {
+            0 -> "No seals active"
+            1 -> "${VaultManager.remainingTimeLabel(applicationContext)} remaining"
+            else -> "${seals.size} seals active · next unlock in ${VaultManager.remainingTimeLabel(applicationContext)}"
+        }
+
         return NotificationCompat.Builder(this, FortressApplication.SENTINEL_CHANNEL_ID)
             .setContentTitle("Fortress Active")
-            .setContentText("${VaultManager.remainingTimeLabel(applicationContext)} remaining")
+            .setContentText(text)
             .setSmallIcon(R.drawable.ic_shield)
             .setOngoing(true)
             .setContentIntent(pendingIntent)

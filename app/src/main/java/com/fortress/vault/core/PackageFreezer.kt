@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.util.Log
 import com.fortress.vault.FortressAdminReceiver
 
-
 object PackageFreezer {
 
     private const val TAG = "PackageFreezer"
@@ -30,6 +29,7 @@ object PackageFreezer {
 
         try {
             dpm.setApplicationHidden(admin, packageName, true)
+
             val failedPackages = dpm.setPackagesSuspended(admin, arrayOf(packageName), true)
             if (failedPackages.isNotEmpty()) {
                 Log.w(TAG, "Could not suspend: ${failedPackages.joinToString()}")
@@ -50,6 +50,9 @@ object PackageFreezer {
         try {
             dpm.setApplicationHidden(admin, packageName, false)
             dpm.setPackagesSuspended(admin, arrayOf(packageName), false)
+            // NOTE: we deliberately do NOT restore permissions automatically —
+            // the user re-grants them the normal way on next launch. This is
+            // a small extra bit of friction that's intentional, not a bug.
         } catch (e: SecurityException) {
             Log.e(TAG, "Failed to unfreeze $packageName", e)
         }

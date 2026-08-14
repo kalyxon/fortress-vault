@@ -13,14 +13,15 @@ import com.fortress.vault.ui.theme.EmberRed
 import kotlin.random.Random
 
 @Composable
-fun EmergencyUnlockScreen(onUnlocked: () -> Unit, onCancel: () -> Unit) {
+fun EmergencyUnlockScreen(sealId: String, onUnlocked: () -> Unit, onCancel: () -> Unit) {
     val context = LocalContext.current
 
+    val seal = remember(sealId) { VaultManager.activeSeals(context).firstOrNull { it.id == sealId } }
     val challengeCode = remember { generateChallengeCode() }
     var typedChallenge by remember { mutableStateOf("") }
     var recoveryInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    val inCooldown = remember { VaultManager.isInCooldown(context) }
+    val inCooldown = remember(sealId) { VaultManager.isInCooldown(context, sealId) }
 
     Column(
         modifier = Modifier
@@ -30,17 +31,30 @@ fun EmergencyUnlockScreen(onUnlocked: () -> Unit, onCancel: () -> Unit) {
     ) {
         Text("Emergency Unlock", style = MaterialTheme.typography.headlineMedium, color = EmberRed)
         Spacer(Modifier.height(8.dp))
+
+        if (seal == null) {
+            Text(
+                "This seal is no longer active — it may have already expired or been unlocked.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(24.dp))
+            TextButton(onClick = onCancel) { Text("Back") }
+            return@Column
+        }
+
         Text(
-            "This breaks the seal immediately. Make sure this is real.",
+            "This breaks the seal on ${seal.packages.size} app(s) immediately. Make sure this is real.",
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         if (inCooldown) {
             Spacer(Modifier.height(32.dp))
             Text(
-                "Too many failed attempts. Try again later — this cooldown exists on purpose.",
+                "Too many failed attempts on this seal. Try again later — this cooldown exists on purpose.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(Modifier.height(24.dp))
+            TextButton(onClick = onCancel) { Text("Back") }
         } else {
             Spacer(Modifier.height(32.dp))
             Text("Step 1 — type this exactly:", style = MaterialTheme.typography.titleMedium)
@@ -55,7 +69,7 @@ fun EmergencyUnlockScreen(onUnlocked: () -> Unit, onCancel: () -> Unit) {
             )
 
             Spacer(Modifier.height(28.dp))
-            Text("Step 2 — your 12-word recovery phrase:", style = MaterialTheme.typography.titleMedium)
+            Text("Step 2 — this seal's 12-word recovery phrase:", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = recoveryInput,
@@ -75,11 +89,11 @@ fun EmergencyUnlockScreen(onUnlocked: () -> Unit, onCancel: () -> Unit) {
                 Button(
                     enabled = typedChallenge == challengeCode && recoveryInput.isNotBlank(),
                     onClick = {
-                        val success = VaultManager.attemptEmergencyUnlock(context, recoveryInput)
+                        val success = VaultManager.attemptEmergencyUnlock(context, sealId, recoveryInput)
                         if (success) {
                             onUnlocked()
                         } else {
-                            errorMessage = "That phrase doesn't match. Attempts are limited."
+                            errorMessage = "That phrase doesn't match this seal. Attempts are limited."
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmberRed)

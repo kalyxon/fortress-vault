@@ -8,23 +8,30 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.fortress.vault.core.VaultManager
+import androidx.navigation.navArgument
+import com.fortress.vault.core.OnboardingPrefs
 import com.fortress.vault.ui.screens.EmergencyUnlockScreen
 import com.fortress.vault.ui.screens.HomeScreen
 import com.fortress.vault.ui.screens.SealVaultScreen
 import com.fortress.vault.ui.screens.SetupScreen
+import com.fortress.vault.ui.screens.TermsScreen
 import com.fortress.vault.ui.theme.FortressVaultTheme
 
 object Routes {
+    const val TERMS = "terms"
     const val SETUP = "setup"
     const val HOME = "home"
     const val SEAL = "seal"
-    const val EMERGENCY = "emergency"
+    const val EMERGENCY = "emergency/{sealId}"
+
+    fun emergency(sealId: String) = "emergency/$sealId"
 }
 
 class MainActivity : ComponentActivity() {
@@ -41,7 +48,16 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             FortressVaultTheme {
-                FortressNavHost(isDeviceOwner = isDeviceOwner())
+                androidx.compose.material3.Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.background,
+                    contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onBackground
+                ) {
+                    FortressNavHost(
+                        hasAcceptedTerms = OnboardingPrefs.hasAcceptedTerms(this),
+                        isDeviceOwner = isDeviceOwner()
+                    )
+                }
             }
         }
     }
@@ -53,20 +69,27 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun FortressNavHost(isDeviceOwner: Boolean) {
+fun FortressNavHost(hasAcceptedTerms: Boolean, isDeviceOwner: Boolean) {
     val navController: NavHostController = rememberNavController()
-    val context = LocalContext.current
-    val startDestination = if (!isDeviceOwner) Routes.SETUP else Routes.HOME
+    val startDestination = when {
+        !hasAcceptedTerms -> Routes.TERMS
+        !isDeviceOwner -> Routes.SETUP
+        else -> Routes.HOME
+    }
 
     NavHost(navController = navController, startDestination = startDestination) {
+        composable(Routes.TERMS) {
+            TermsScreen(
+                onAccepted = {
+                    navController.navigate(Routes.SETUP) {
+                        popUpTo(Routes.TERMS) { inclusive = true }
+                    }
+                }
+            )
+        }
         composable(Routes.SETUP) {
             SetupScreen(
-                onDeviceOwnerConfirmed = { organizationName ->
-                    val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                    dpm.setOrganizationName(
-                        FortressAdminReceiver.getComponentName(context),
-                        organizationName
-                    )
+                onDeviceOwnerConfirmed = {
                     navController.navigate(Routes.HOME) {
                         popUpTo(Routes.SETUP) { inclusive = true }
                     }
@@ -76,26 +99,23 @@ fun FortressNavHost(isDeviceOwner: Boolean) {
         composable(Routes.HOME) {
             HomeScreen(
                 onSealVault = { navController.navigate(Routes.SEAL) },
-                onEmergencyUnlock = { navController.navigate(Routes.EMERGENCY) }
+                onEmergencyUnlock = { sealId -> navController.navigate(Routes.emergency(sealId)) }
             )
         }
         composable(Routes.SEAL) {
             SealVaultScreen(
-                onSealed = {
-                    navController.navigate(Routes.HOME) {
-                        popUpTo(Routes.SEAL) { inclusive = true }
-                    }
-                },
+                onSealed = { navController.popBackStack() },
                 onCancel = { navController.popBackStack() }
             )
         }
-        composable(Routes.EMERGENCY) {
+        composable(
+            route = Routes.EMERGENCY,
+            arguments = listOf(navArgument("sealId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val sealId = backStackEntry.arguments?.getString("sealId").orEmpty()
             EmergencyUnlockScreen(
-                onUnlocked = {
-                    navController.navigate(Routes.HOME) {
-                        popUpTo(Routes.EMERGENCY) { inclusive = true }
-                    }
-                },
+                sealId = sealId,
+                onUnlocked = { navController.popBackStack() },
                 onCancel = { navController.popBackStack() }
             )
         }
