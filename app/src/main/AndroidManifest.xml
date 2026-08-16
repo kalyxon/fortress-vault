@@ -2,18 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Core permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Needed to enumerate + freeze arbitrary installed packages.
-         NOTE: QUERY_ALL_PACKAGES triggers extra Play Console review
-         if you ever attempt store distribution. Device Owner apps are
-         generally sideloaded, so this is expected. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
@@ -35,8 +29,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Device Admin / Device Owner receiver: our root of authority -->
+        
         <receiver
             android:name=".FortressAdminReceiver"
             android:exported="true"
@@ -61,13 +54,18 @@
             </intent-filter>
         </receiver>
 
-        <!-- Instantly re-freezes a blocked app if the user reinstalls it -->
+        <!-- Instantly re-freezes blocked apps if the user reinstalls or updates them -->
         <receiver
             android:name=".receiver.PackageChangeReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="android.intent.action.PACKAGE_ADDED" />
                 <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.PACKAGE_CHANGED" />
+                <action android:name="android.intent.action.PACKAGE_REMOVED" />
+                <action android:name="android.intent.action.PACKAGE_RESTARTED" />
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
                 <data android:scheme="package" />
             </intent-filter>
         </receiver>
@@ -81,6 +79,12 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Self-imposed app blocking enforcement" />
         </service>
+
+        <activity
+            android:name=".ui.screens.AppLockActivity"
+            android:exported="true"
+            android:taskAffinity="">
+        </activity>
 
     </application>
 </manifest>
