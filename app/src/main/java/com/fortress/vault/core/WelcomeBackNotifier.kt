@@ -11,10 +11,13 @@ import com.fortress.vault.FortressApplication
 import com.fortress.vault.MainActivity
 import com.fortress.vault.R
 
-
 object WelcomeBackNotifier {
 
     private const val NOTIFICATION_ID = 2001
+
+    fun clear(context: Context) {
+        NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+    }
 
     fun show(context: Context, reason: String) {
         val hasPermission = ContextCompat.checkSelfPermission(

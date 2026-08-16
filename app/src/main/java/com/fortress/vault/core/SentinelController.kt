@@ -10,15 +10,6 @@ import com.fortress.vault.service.SentinelService
 import com.fortress.vault.service.SentinelWorker
 import java.util.concurrent.TimeUnit
 
-/**
- * Two overlapping enforcement mechanisms, on purpose:
- *  1. SentinelService — a foreground service that keeps a persistent
- *     notification and runs a tight in-process check loop while alive.
- *  2. SentinelWorker — a WorkManager periodic job that acts as the
- *     dead-man's-switch: if the OS kills the foreground service to reclaim
- *     memory, this worker fires (minimum interval Android allows is 15 min)
- *     and both re-enforces the freeze AND restarts the service.
- */
 object SentinelController {
 
     private const val WORK_NAME = "fortress_sentinel_periodic_work"

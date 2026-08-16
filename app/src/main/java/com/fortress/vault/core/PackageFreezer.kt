@@ -29,15 +29,26 @@ object PackageFreezer {
 
         try {
             dpm.setApplicationHidden(admin, packageName, true)
-
             val failedPackages = dpm.setPackagesSuspended(admin, arrayOf(packageName), true)
             if (failedPackages.isNotEmpty()) {
                 Log.w(TAG, "Could not suspend: ${failedPackages.joinToString()}")
+                scheduleFreezeRetry(context, packageName)
             }
-
             revokeAllRuntimePermissions(context, dpm, admin, packageName)
         } catch (e: SecurityException) {
             Log.e(TAG, "Failed to freeze $packageName", e)
+            scheduleFreezeRetry(context, packageName)
+        }
+    }
+
+    private fun scheduleFreezeRetry(context: Context, packageName: String) {
+        try {
+            val work = androidx.work.OneTimeWorkRequestBuilder<com.fortress.vault.service.PackageChangeReinforceWorker>()
+                .setInitialDelay(2, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            androidx.work.WorkManager.getInstance(context).enqueue(work)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to schedule freeze retry for $packageName: ${e.message}")
         }
     }
 
@@ -50,9 +61,6 @@ object PackageFreezer {
         try {
             dpm.setApplicationHidden(admin, packageName, false)
             dpm.setPackagesSuspended(admin, arrayOf(packageName), false)
-            // NOTE: we deliberately do NOT restore permissions automatically —
-            // the user re-grants them the normal way on next launch. This is
-            // a small extra bit of friction that's intentional, not a bug.
         } catch (e: SecurityException) {
             Log.e(TAG, "Failed to unfreeze $packageName", e)
         }
@@ -79,7 +87,6 @@ object PackageFreezer {
                         DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED
                     )
                 } catch (e: Exception) {
-                    // Some permissions (e.g. signature-level) can't be set this way — expected, skip.
                 }
             }
         } catch (e: PackageManager.NameNotFoundException) {
@@ -87,10 +94,13 @@ object PackageFreezer {
         }
     }
 
-    /** Called right after a freeze target gets reinstalled — re-applies the freeze instantly. */
     fun onPackageReinstalled(context: Context, packageName: String) {
-        if (VaultManager.isSealed(context) && packageName in VaultManager.blockedPackages(context)) {
-            freezeOne(context, packageName)
-        }
+        if (!VaultManager.isSealed(context)) return
+
+        val blocked = VaultManager.blockedPackages(context)
+        if (blocked.isEmpty()) return
+
+        Log.i(TAG, "Package $packageName reinstalled/updated while sealed; reapplying freeze to ${blocked.size} blocked package(s)")
+        freezeAll(context, blocked)
     }
 }
