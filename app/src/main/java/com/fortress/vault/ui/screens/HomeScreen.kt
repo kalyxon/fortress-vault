@@ -1,7 +1,9 @@
 package com.fortress.vault.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +22,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import com.fortress.vault.core.MAX_SEAL_DURATION_DAYS
+import com.fortress.vault.core.MIN_SEAL_DURATION_DAYS
 import com.fortress.vault.core.Seal
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.ui.theme.BrassPrimary
@@ -35,10 +39,9 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
 
     var seals by remember { mutableStateOf(VaultManager.activeSeals(context)) }
     var extendTargetSealId by remember { mutableStateOf<String?>(null) }
+    var detailsSealId by remember { mutableStateOf<String?>(null) }
+    var addAppsTargetSealId by remember { mutableStateOf<String?>(null) }
 
-    // Local-only tick, no network call — TimeKeeper's estimate is derived
-    // from the monotonic elapsed-realtime clock, so this refresh stays
-    // correct even if the user just changed the device's date.
     LaunchedEffect(Unit) {
         while (true) {
             seals = VaultManager.activeSeals(context)
@@ -82,6 +85,7 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
                 items(seals, key = { it.id }) { seal ->
                     SealCard(
                         seal = seal,
+                        onTap = { detailsSealId = seal.id },
                         onExtend = { extendTargetSealId = seal.id },
                         onEmergencyUnlock = { onEmergencyUnlock(seal.id) }
                     )
@@ -104,10 +108,42 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
             }
         )
     }
+
+    if (detailsSealId != null) {
+        val detailsSeal = seals.firstOrNull { it.id == detailsSealId }
+        if (detailsSeal != null) {
+            SealDetailDialog(
+                seal = detailsSeal,
+                context = context,
+                onDismiss = { detailsSealId = null },
+                onAddApps = { addAppsTargetSealId = detailsSeal.id }
+            )
+        } else {
+            detailsSealId = null
+        }
+    }
+
+    val addAppsTarget = addAppsTargetSealId
+    if (addAppsTarget != null) {
+        AddAppsToSealDialog(
+            sealId = addAppsTarget,
+            seals = seals,
+            context = context,
+            onDismiss = { addAppsTargetSealId = null },
+            onConfirm = { selected ->
+                coroutineScope.launch {
+                    VaultManager.addPackagesToSeal(context, addAppsTarget, selected)
+                    seals = VaultManager.activeSeals(context)
+                }
+                addAppsTargetSealId = null
+                detailsSealId = null
+            }
+        )
+    }
 }
 
 @Composable
-private fun SealCard(seal: Seal, onExtend: () -> Unit, onEmergencyUnlock: () -> Unit) {
+private fun SealCard(seal: Seal, onTap: () -> Unit, onExtend: () -> Unit, onEmergencyUnlock: () -> Unit) {
     val context = LocalContext.current
     var remainingLabel by remember(seal.id) { mutableStateOf(VaultManager.remainingLabelFor(context, seal)) }
 
@@ -119,7 +155,9 @@ private fun SealCard(seal: Seal, onExtend: () -> Unit, onEmergencyUnlock: () -> 
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onTap),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(20.dp)
     ) {
@@ -163,10 +201,147 @@ private fun SealCard(seal: Seal, onExtend: () -> Unit, onEmergencyUnlock: () -> 
     }
 }
 
+private data class PackageEntry(val packageName: String, val label: String)
+
+@Composable
+private fun SealDetailDialog(
+    seal: Seal,
+    context: android.content.Context,
+    onDismiss: () -> Unit,
+    onAddApps: () -> Unit
+) {
+    val uniquePackages = remember(seal) { seal.packages.toList().distinct() }
+    val apps = remember(uniquePackages) {
+        uniquePackages.map { packageName ->
+            val label = runCatching {
+                val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
+                context.packageManager.getApplicationLabel(appInfo).toString()
+            }.getOrDefault(packageName)
+            PackageEntry(packageName, label)
+        }.sortedBy { it.label.lowercase() }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Seal details") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "This seal is blocking ${seal.packages.size} app${if (seal.packages.size == 1) "" else "s"}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                    items(apps) { app ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val icon = remember(app.packageName) {
+                                runCatching { context.packageManager.getApplicationIcon(app.packageName).toBitmap().asImageBitmap() }.getOrNull()
+                            }
+                            if (icon != null) {
+                                Image(
+                                    bitmap = icon,
+                                    contentDescription = app.label,
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                )
+                                Spacer(Modifier.width(10.dp))
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(app.label, style = MaterialTheme.typography.bodyLarge)
+                                Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = onAddApps) { Text("Add apps", color = BrassPrimary) }
+                TextButton(onClick = onDismiss) { Text("Close", color = BrassPrimary) }
+            }
+        }
+    )
+}
+
+@Composable
+private fun AddAppsToSealDialog(
+    sealId: String,
+    seals: List<Seal>,
+    context: android.content.Context,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<String>) -> Unit
+) {
+    val allApps = remember(sealId) { loadLaunchableApps(context) }
+    val existingPackages = remember(sealId, seals) {
+        seals.firstOrNull { it.id == sealId }?.packages.orEmpty()
+    }
+    val candidates = remember(sealId) { allApps.filter { it.packageName !in existingPackages } }
+    val selected = remember { mutableStateOf(setOf<String>()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add apps to this seal") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "This keeps the same emergency phrase and recovery key for this seal.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                if (candidates.isEmpty()) {
+                    Text("No more apps are available to add to this seal.", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                        items(candidates) { app ->
+                            val checked = selected.value.contains(app.packageName)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selected.value = if (checked) selected.value - app.packageName else selected.value + app.packageName }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = null,
+                                    colors = CheckboxDefaults.colors(checkedColor = BrassPrimary)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(app.label, style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = selected.value.isNotEmpty(),
+                onClick = { onConfirm(selected.value) }
+            ) {
+                Text("Add selected", color = BrassPrimary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
 @Composable
 private fun AppIconRow(context: android.content.Context, packages: Set<String>) {
+    val uniquePackages = packages.toList().distinct()
     Row {
-        packages.take(8).forEach { pkg ->
+        uniquePackages.take(8).forEach { pkg ->
             val icon = remember(pkg) {
                 runCatching { context.packageManager.getApplicationIcon(pkg).toBitmap().asImageBitmap() }.getOrNull()
             }
@@ -181,7 +356,7 @@ private fun AppIconRow(context: android.content.Context, packages: Set<String>) 
                 )
             }
         }
-        if (packages.size > 8) {
+        if (uniquePackages.size > 8) {
             Box(
                 modifier = Modifier
                     .size(32.dp)
@@ -189,7 +364,7 @@ private fun AppIconRow(context: android.content.Context, packages: Set<String>) 
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
-                Text("+${packages.size - 8}", style = MaterialTheme.typography.bodyMedium)
+                Text("+${uniquePackages.size - 8}", style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -208,7 +383,7 @@ private fun ExtendSealDialog(onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
                 Slider(
                     value = extraDays.toFloat(),
                     onValueChange = { extraDays = it.toInt() },
-                    valueRange = 1f..60f,
+                    valueRange = MIN_SEAL_DURATION_DAYS.toFloat()..MAX_SEAL_DURATION_DAYS.toFloat(),
                     colors = SliderDefaults.colors(thumbColor = BrassPrimary, activeTrackColor = BrassPrimary)
                 )
                 Text(

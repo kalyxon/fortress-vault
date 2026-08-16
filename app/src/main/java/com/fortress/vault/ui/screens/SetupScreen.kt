@@ -155,13 +155,10 @@ fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
                     return@Button
                 }
 
-                // Apply organization name now that we're device owner and the
-                // user provided a non-empty name, then proceed.
                 try {
                     val admin = com.fortress.vault.FortressAdminReceiver.getComponentName(context)
                     dpm.setOrganizationName(admin, orgName)
                 } catch (_: Exception) {
-                    // Best-effort: failures here shouldn't block setup progression.
                 }
 
                 onDeviceOwnerConfirmed()
@@ -201,6 +198,5 @@ private fun SetupStep(number: Int, title: String, description: String?) {
     }
 }
 
-// Small helper so this file has no extra foundation-scroll import ambiguity.
 @Composable
 private fun rememberScrollStateCompat() = androidx.compose.foundation.rememberScrollState()
