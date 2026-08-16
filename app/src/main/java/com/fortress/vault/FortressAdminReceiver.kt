@@ -13,8 +13,6 @@ class FortressAdminReceiver : DeviceAdminReceiver() {
         VaultManager.init(context)
     }
 
-    // Fires when the user tries to uncheck "Fortress" under
-    // Settings > Security > Device Admin Apps.
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
         val remaining = VaultManager.remainingTimeLabel(context)
         return if (VaultManager.isSealed(context)) {
@@ -26,7 +24,6 @@ class FortressAdminReceiver : DeviceAdminReceiver() {
 
     override fun onDisabled(context: Context, intent: Intent) {
         super.onDisabled(context, intent)
-        // If we ever legitimately reach here (vault unsealed), clean up.
         VaultManager.onAdminDisabled()
     }
 

@@ -7,12 +7,6 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.fortress.vault.core.VaultManager
 
-/**
- * Runs at minimum every ~15 minutes regardless of whether SentinelService is
- * alive. Its main job: if the vault is sealed but the foreground service got
- * killed, restart it. It also independently re-runs the enforcement check so
- * there's never more than one WorkManager interval of unguarded time.
- */
 class SentinelWorker(
     context: Context,
     params: WorkerParameters
