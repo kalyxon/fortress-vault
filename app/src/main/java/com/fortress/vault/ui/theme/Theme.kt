@@ -5,9 +5,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
-// The Fortress is intentionally always-dark: a vault doesn't get a light
-// mode. isSystemInDarkTheme() is read but unused on purpose, documenting
-// that this was a deliberate choice, not an oversight.
 private val FortressColorScheme = darkColorScheme(
     primary = BrassPrimary,
     onPrimary = ObsidianBlack,
