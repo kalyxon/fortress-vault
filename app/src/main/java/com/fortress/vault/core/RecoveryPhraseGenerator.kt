@@ -15,7 +15,6 @@ object RecoveryPhraseGenerator {
         return entropyToPhrase(entropy)
     }
 
-    /** True if the phrase is well-formed BIP39 (right words, correct checksum). */
     fun isValidPhrase(phrase: String): Boolean {
         val words = normalize(phrase).split(" ")
         if (words.size != WORD_COUNT) return false

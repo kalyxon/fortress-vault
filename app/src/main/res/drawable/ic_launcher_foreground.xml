@@ -3,7 +3,18 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Outer shield (gold border) -->
     <path
-        android:fillColor="#C9A24B"
-        android:pathData="M54,20L28,32v22c0,20 15.5,38.7 26,42c10.5,-3.3 26,-22 26,-42V32L54,20zM54,63h20c-1.8,13.6 -11,25.6 -20,29.3V56H34V37.5l20,-9.3V63z" />
+        android:fillColor="#F0CD7E"
+        android:pathData="M54 25.312 C59.063 30.813 66.469 33.938 74.484 34.828 C74.484 51.234 74.484 63.984 54 82.688 C33.563 63.984 33.563 51.234 33.563 34.828 C41.625 33.938 48.938 30.813 54 25.312 Z" />
+
+    <!-- Middle ring (inset, dark) -->
+    <path
+        android:fillColor="#0B0B0D"
+        android:pathData="M54 28.2 C58.58 33.125 65.25 35.966 72.37 36.73 C72.37 51.57 72.37 62.91 54 79.84 C35.588 62.91 35.588 51.57 35.588 36.73 C42.78 35.966 49.44 33.125 54 28.2 Z" />
+
+    <!-- Inner shield (main gold) -->
+    <path
+        android:fillColor="#D9A94A"
+        android:pathData="M54 31.054 C58.0 35.438 63.289 37.969 70.36 38.66 C70.36 51.78 70.36 61.92 54 76.94 C37.64 61.92 37.64 51.78 37.64 38.66 C44.02 37.969 49.93 35.438 54 31.054 Z" />
 </vector>

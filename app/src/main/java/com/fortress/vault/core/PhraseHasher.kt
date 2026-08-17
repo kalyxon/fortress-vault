@@ -5,6 +5,9 @@ import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
+/**
+ * We never store the recovery phrase itself — only a salted PBKDF2 hash.
+ */
 object PhraseHasher {
 
     private const val ITERATIONS = 120_000

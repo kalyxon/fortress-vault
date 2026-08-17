@@ -1,13 +1,12 @@
 package com.fortress.vault.service
 
 import android.content.Context
-import android.content.Intent
-import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.fortress.vault.core.PackageFreezer
 import com.fortress.vault.core.VaultManager
 
-class SentinelWorker(
+class PackageChangeReinforceWorker(
     context: Context,
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
@@ -17,11 +16,13 @@ class SentinelWorker(
             return Result.success()
         }
 
+        val blockedPackages = VaultManager.blockedPackages(applicationContext)
+        if (blockedPackages.isEmpty()) {
+            return Result.success()
+        }
+
+        PackageFreezer.freezeAll(applicationContext, blockedPackages)
         VaultManager.verifyAndEnforce(applicationContext)
-
-        val serviceIntent = Intent(applicationContext, SentinelService::class.java)
-        ContextCompat.startForegroundService(applicationContext, serviceIntent)
-
         return Result.success()
     }
 }

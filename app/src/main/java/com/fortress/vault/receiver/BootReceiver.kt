@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
 import com.fortress.vault.core.PackageFreezer
+import com.fortress.vault.core.PersistentVaultStore
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.service.SentinelService
 import kotlinx.coroutines.CoroutineScope
@@ -19,15 +20,12 @@ class BootReceiver : BroadcastReceiver() {
         ) return
 
         if (!VaultManager.isSealed(context)) return
-
-        // Synchronous, immediate re-freeze using last-known state — don't wait
-        // on a network call before the launcher is usable.
-        PackageFreezer.freezeAll(context, VaultManager.blockedPackages(context))
+        val seals = PersistentVaultStore.read(context) ?: VaultManager.activeSeals(context)
+        PackageFreezer.freezeAll(context, seals.flatMap { it.packages }.toSet())
 
         val serviceIntent = Intent(context, SentinelService::class.java)
         ContextCompat.startForegroundService(context, serviceIntent)
 
-        // Follow up with a full network-time verification once we can.
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.Default).launch {
             try {

@@ -2,10 +2,6 @@ package com.fortress.vault.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// The vault: obsidian, brushed steel, warm brass accent.
-// Deliberately not "productivity app teal" — this should feel like a
-// deliberate, weighty ritual, not a to-do list.
-
 val ObsidianBlack = Color(0xFF0B0C0E)
 val CharcoalSurface = Color(0xFF17181C)
 val SteelSurfaceHigh = Color(0xFF212328)

@@ -5,6 +5,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.fortress.vault.FortressApplication
 import com.fortress.vault.MainActivity
 import com.fortress.vault.R
@@ -15,7 +16,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
-
 
 class SentinelService : Service() {
 
@@ -36,12 +36,26 @@ class SentinelService : Service() {
                         break
                     }
                     VaultManager.verifyAndEnforce(applicationContext)
+                    try {
+                        val blocked = VaultManager.blockedPackages(applicationContext)
+                        if (blocked.isNotEmpty()) {
+                            val am = getSystemService(android.app.ActivityManager::class.java)
+                            val running = am.runningAppProcesses
+                            val foreground = running?.firstOrNull { it.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND }
+                            val fgPkg = foreground?.pkgList?.firstOrNull { it in blocked }
+                            if (fgPkg != null) {
+                                com.fortress.vault.ui.screens.AppLockActivity.start(applicationContext, fgPkg)
+                            }
+                        }
+                    } catch (_: Exception) {
+                    }
                     updateNotification()
-                    delay(TimeUnit.MINUTES.toMillis(15))
+                    // Stronger enforcement: poll frequently while sealed so
+                    // installs/updates/reinstalls are caught quickly.
+                    delay(15_000)
                 }
             }
         }
-        // START_STICKY: ask the OS to recreate us with a null intent if killed.
         return START_STICKY
     }
 
@@ -75,6 +89,7 @@ class SentinelService : Service() {
 
     override fun onDestroy() {
         loopJob?.cancel()
+        NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID)
         super.onDestroy()
     }
 

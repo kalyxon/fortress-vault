@@ -32,9 +32,6 @@ object TimeKeeper {
         val lastElapsed = prefs.getLong(KEY_LAST_SYNC_ELAPSED_REALTIME, -1L)
 
         if (lastReal == -1L) {
-            // Never synced even once (e.g. sealed with zero connectivity ever).
-            // Only real fallback is the wall clock — mitigated by requiring a
-            // successful sync before seal creation is allowed to complete.
             return System.currentTimeMillis()
         }
 

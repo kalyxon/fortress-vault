@@ -19,12 +19,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import com.fortress.vault.core.MAX_SEAL_DURATION_DAYS
+import com.fortress.vault.core.MIN_SEAL_DURATION_DAYS
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.ui.theme.BrassPrimary
 import com.fortress.vault.ui.theme.EmberRed
 import kotlinx.coroutines.launch
 
-private data class InstalledApp(val label: String, val packageName: String)
+data class InstalledApp(val label: String, val packageName: String)
 
 @Composable
 fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
@@ -42,10 +44,6 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val installedApps = remember { loadLaunchableApps(context) }
-    // Snapshot at screen-open time: which packages a *different*, already-
-    // active seal covers. Those get shown disabled with their own countdown
-    // instead of a checkbox — "add time" to them from the Home screen card
-    // instead of starting an ambiguous second seal on the same app.
     val sealByPackage = remember {
         VaultManager.activeSeals(context).flatMap { seal -> seal.packages.map { it to seal } }.toMap()
     }
@@ -149,7 +147,7 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                 Slider(
                     value = durationDays.toFloat(),
                     onValueChange = { durationDays = it.toInt() },
-                    valueRange = 1f..90f,
+                    valueRange = MIN_SEAL_DURATION_DAYS.toFloat()..MAX_SEAL_DURATION_DAYS.toFloat(),
                     colors = SliderDefaults.colors(thumbColor = BrassPrimary, activeTrackColor = BrassPrimary)
                 )
                 errorMessage?.let {
@@ -311,7 +309,7 @@ private fun AppRow(
     }
 }
 
-private fun loadLaunchableApps(context: android.content.Context): List<InstalledApp> {
+fun loadLaunchableApps(context: android.content.Context): List<InstalledApp> {
     val pm = context.packageManager
     val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
     return pm.queryIntentActivities(intent, 0)
