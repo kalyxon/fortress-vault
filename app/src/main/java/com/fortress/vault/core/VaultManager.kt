@@ -17,6 +17,19 @@ object VaultManager {
     private const val PREFS_NAME = "fortress_vault_encrypted_prefs"
     private const val KEY_SEALS_JSON = "seals_json"
 
+    /**
+     * Grace window before we treat a time discrepancy as a clock-rollback attempt.
+     * Estimation via elapsedRealtime + last-sync can drift by a minute or two;
+     * only call it a rollback if the gap exceeds 5 minutes.
+     */
+    private val ROLLBACK_TOLERANCE_MS = TimeUnit.MINUTES.toMillis(5)
+
+    /**
+     * Minimum gap between successive rollback penalties on the same seal.
+     * Prevents stacking from concurrent SentinelService / SentinelWorker calls.
+     */
+    private val PENALTY_COOLDOWN_MS = TimeUnit.HOURS.toMillis(25)
+
     private lateinit var prefs: android.content.SharedPreferences
     private var initialized = false
     private val lock = Any()
@@ -88,13 +101,13 @@ object VaultManager {
         ) == 1
     }.getOrDefault(false)
 
-    suspend fun createSeal(context: Context, packages: Set<String>, durationDays: Int, allowAdb: Boolean = false): Pair<String, String> {
-        val (seal, phrase) = prepareSeal(context, packages, durationDays, allowAdb)
+    suspend fun createSeal(context: Context, packages: Set<String>, durationDays: Int, allowAdb: Boolean = false, blockUserSwitch: Boolean = false): Pair<String, String> {
+        val (seal, phrase) = prepareSeal(context, packages, durationDays, allowAdb, blockUserSwitch)
         commitSeal(context, seal)
         return seal.id to phrase
     }
 
-    suspend fun prepareSeal(context: Context, packages: Set<String>, durationDays: Int, allowAdb: Boolean = false): Pair<Seal, String> {
+    suspend fun prepareSeal(context: Context, packages: Set<String>, durationDays: Int, allowAdb: Boolean = false, blockUserSwitch: Boolean = false): Pair<Seal, String> {
         init(context)
         require(durationDays in MIN_SEAL_DURATION_DAYS..MAX_SEAL_DURATION_DAYS) {
             "Seal duration must be between $MIN_SEAL_DURATION_DAYS and $MAX_SEAL_DURATION_DAYS days."
@@ -118,7 +131,8 @@ object VaultManager {
             lastKnownGoodMillis = networkTime,
             recoverySalt = hashed.saltHex,
             recoveryHash = hashed.hashHex,
-            allowAdb = allowAdb
+            allowAdb = allowAdb,
+            blockUserSwitch = blockUserSwitch
         )
 
         return seal to recoveryPhrase
@@ -197,10 +211,23 @@ object VaultManager {
             val (expired, stillActive) = seals.partition { networkTime >= it.unlockAtMillis }
 
             val adjustedActive = stillActive.map { seal ->
-                if (networkTime < seal.lastKnownGoodMillis) {
-                    seal.copy(unlockAtMillis = seal.unlockAtMillis + TimeUnit.HOURS.toMillis(24))
+                val rollbackDetected = networkTime < (seal.lastKnownGoodMillis - ROLLBACK_TOLERANCE_MS)
+                val penaltyAlreadyApplied = (networkTime - seal.lastPenaltyAtMillis) < PENALTY_COOLDOWN_MS
+
+                if (rollbackDetected && !penaltyAlreadyApplied) {
+                    Log.i("VaultManager", "Clock rollback detected on seal ${seal.id} — extending by 24h")
+                    WelcomeBackNotifier.show(context, "Clock rollback detected — seal extended by 24h.")
+                    seal.copy(
+                        unlockAtMillis = seal.unlockAtMillis + TimeUnit.HOURS.toMillis(24),
+                        lastPenaltyAtMillis = networkTime
+                    )
                 } else {
-                    seal.copy(lastKnownGoodMillis = networkTime)
+                    // Advance lastKnownGood only when time is moving forward.
+                    if (networkTime > seal.lastKnownGoodMillis) {
+                        seal.copy(lastKnownGoodMillis = networkTime)
+                    } else {
+                        seal
+                    }
                 }
             }
 
@@ -272,7 +299,6 @@ object VaultManager {
         val target = seals.firstOrNull { packageName in it.packages } ?: return false
         val normalized = RecoveryPhraseGenerator.normalize(enteredPhrase)
         val matches = PhraseHasher.matches(normalized, target.recoverySalt, target.recoveryHash)
-        val trustedNow = TimeKeeper.estimateCurrentTrustedTimeMillis(context)
         if (!matches) {
             return false
         }
@@ -312,6 +338,9 @@ object VaultManager {
             dpm.setUninstallBlocked(admin, context.packageName, false)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
+            // Release user-management restrictions when no seals are active.
+            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_ADD_USER)
+            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
             return
         }
 
@@ -324,6 +353,17 @@ object VaultManager {
         } else {
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
         }
+
+        // Block adding new users while any seal is active (closes the "create new user" bypass).
+        dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_ADD_USER)
+
+        // Block user-switching only if at least one active seal requests it.
+        val anyBlockSwitch = seals.any { it.blockUserSwitch }
+        if (anyBlockSwitch) {
+            dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
+        } else {
+            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
+        }
     }
 
     private fun releaseDeviceOwnerLock(context: Context) {
@@ -333,6 +373,8 @@ object VaultManager {
             dpm.setUninstallBlocked(admin, context.packageName, false)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
+            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_ADD_USER)
+            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
         }
     }
 
