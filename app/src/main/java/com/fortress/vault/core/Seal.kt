@@ -13,7 +13,12 @@ data class Seal(
     val recoveryHash: String,
     val allowAdb: Boolean = false,
     val failedAttempts: Int = 0,
-    val cooldownUntilMillis: Long = 0L
+    val cooldownUntilMillis: Long = 0L,
+    /** Epoch-millis of the last time a 24-hour rollback-penalty was applied.
+     *  0 means no penalty has ever been applied. Used to prevent stacking. */
+    val lastPenaltyAtMillis: Long = 0L,
+    /** True while user-switching is restricted for this seal's lifetime. */
+    val blockUserSwitch: Boolean = false
 )
 
 object SealCodec {
@@ -43,6 +48,8 @@ object SealCodec {
         put("allowAdb", seal.allowAdb)
         put("failedAttempts", seal.failedAttempts)
         put("cooldownUntil", seal.cooldownUntilMillis)
+        put("lastPenaltyAt", seal.lastPenaltyAtMillis)
+        put("blockUserSwitch", seal.blockUserSwitch)
     }
 
     private fun decodeOne(obj: JSONObject): Seal {
@@ -58,7 +65,9 @@ object SealCodec {
             recoveryHash = obj.getString("recoveryHash"),
             allowAdb = obj.optBoolean("allowAdb", false),
             failedAttempts = obj.optInt("failedAttempts", 0),
-            cooldownUntilMillis = obj.optLong("cooldownUntil", 0L)
+            cooldownUntilMillis = obj.optLong("cooldownUntil", 0L),
+            lastPenaltyAtMillis = obj.optLong("lastPenaltyAt", 0L),
+            blockUserSwitch = obj.optBoolean("blockUserSwitch", false)
         )
     }
 }

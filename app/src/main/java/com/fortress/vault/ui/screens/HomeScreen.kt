@@ -12,6 +12,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -231,8 +234,93 @@ private fun SealDetailDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                // ── Security badges ──────────────────────────────────────────
                 Spacer(Modifier.height(12.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                // USB Debugging badge
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (seal.allowAdb) EmberRed.copy(alpha = 0.10f)
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (seal.allowAdb) Icons.Filled.Warning else Icons.Filled.Shield,
+                        contentDescription = null,
+                        tint = if (seal.allowAdb) EmberRed else BrassPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            if (seal.allowAdb) "USB debugging: allowed" else "USB debugging: blocked",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (seal.allowAdb) EmberRed else BrassPrimary
+                        )
+                        Text(
+                            if (seal.allowAdb)
+                                "⚠ A connected computer can bypass this seal."
+                            else
+                                "ADB access is restricted for the duration.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // User-switching badge
+                val isSystemSwitchBlocked = remember(seal) {
+                    VaultManager.activeSeals(context).any { it.blockUserSwitch }
+                }
+                val isBlockedForThisSealOrActive = seal.blockUserSwitch || isSystemSwitchBlocked
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isBlockedForThisSealOrActive) MaterialTheme.colorScheme.surfaceVariant
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isBlockedForThisSealOrActive) Icons.Filled.Block else Icons.Filled.Shield,
+                        contentDescription = null,
+                        tint = if (isBlockedForThisSealOrActive) BrassPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            if (isBlockedForThisSealOrActive) "User switching: blocked" else "User switching: allowed",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isBlockedForThisSealOrActive) BrassPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            if (seal.blockUserSwitch)
+                                "Switching to Guest or secondary profiles is disabled by this seal."
+                            else if (isSystemSwitchBlocked)
+                                "Switching is currently blocked on this device by another active seal."
+                            else
+                                "Apps are frozen in all accounts, but switching is allowed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                // ─────────────────────────────────────────────────────────────
+
+                Spacer(Modifier.height(12.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
                     items(apps) { app ->
                         Row(
                             modifier = Modifier
