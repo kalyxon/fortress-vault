@@ -34,6 +34,9 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class InstalledApp(val label: String, val packageName: String)
 
@@ -75,7 +78,7 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                         )
                         recoveryPhrase = phrase
                         pendingSeal = seal
-                        step = SealStep.SHOW_RECOVERY_PHRASE
+                        step = SealStep.CONFIRM_SEAL
                     } catch (e: IllegalArgumentException) {
                         errorMessage = e.message ?: "Couldn't create this seal."
                     } finally {
@@ -232,7 +235,7 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                                         )
                                         recoveryPhrase = phrase
                                         pendingSeal = seal
-                                        step = SealStep.SHOW_RECOVERY_PHRASE
+                                        step = SealStep.CONFIRM_SEAL
                                     } catch (e: IllegalArgumentException) {
                                         errorMessage = e.message ?: "Couldn't create this seal."
                                     } finally {
@@ -244,6 +247,55 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                         colors = ButtonDefaults.buttonColors(containerColor = EmberRed)
                     ) {
                         Text(if (isSealing) "Sealing..." else "Seal It", color = MaterialTheme.colorScheme.onError)
+                    }
+                }
+            }
+
+            SealStep.CONFIRM_SEAL -> {
+                val seal = pendingSeal
+                val appLabels = selectedPackages
+                    .map { packageName -> installedApps.firstOrNull { it.packageName == packageName }?.label ?: packageName }
+                    .sorted()
+                val unlockDate = seal?.let {
+                    SimpleDateFormat("EEE, d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(it.unlockAtMillis))
+                } ?: "Unknown"
+
+                Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                    Text("Confirm This Seal", style = MaterialTheme.typography.headlineMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Review the apps and unlock date carefully. Nothing is blocked until you confirm.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Text("Apps to block (${appLabels.size})", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            appLabels.forEach { label ->
+                                Text("- $label", color = TextPrimary)
+                                Spacer(Modifier.height(4.dp))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(20.dp))
+                    Text("Unlock date", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(unlockDate, style = MaterialTheme.typography.titleLarge, color = BrassPrimary)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    TextButton(onClick = { step = SealStep.SET_DURATION }) { Text("Back") }
+                    Button(
+                        onClick = { step = SealStep.SHOW_RECOVERY_PHRASE },
+                        colors = ButtonDefaults.buttonColors(containerColor = EmberRed)
+                    ) {
+                        Text("Confirm Seal", color = MaterialTheme.colorScheme.onError)
                     }
                 }
             }
@@ -465,7 +517,7 @@ private fun UserSwitchBlockDialog(
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
-private enum class SealStep { SELECT_APPS, SET_DURATION, SHOW_RECOVERY_PHRASE }
+private enum class SealStep { SELECT_APPS, SET_DURATION, CONFIRM_SEAL, SHOW_RECOVERY_PHRASE }
 
 @Composable
 private fun AppRow(
