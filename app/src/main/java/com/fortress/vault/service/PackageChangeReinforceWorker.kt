@@ -12,17 +12,26 @@ class PackageChangeReinforceWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        val packageName = inputData.getString(KEY_PACKAGE) ?: return Result.success()
         if (!VaultManager.isSealed(applicationContext)) {
             return Result.success()
         }
 
         val blockedPackages = VaultManager.blockedPackages(applicationContext)
-        if (blockedPackages.isEmpty()) {
+        if (packageName !in blockedPackages) {
             return Result.success()
         }
 
-        PackageFreezer.freezeAll(applicationContext, blockedPackages)
-        VaultManager.verifyAndEnforce(applicationContext)
-        return Result.success()
+        val enforced = PackageFreezer.freezePackage(applicationContext, packageName)
+        return if (enforced || runAttemptCount >= MAX_RETRIES) {
+            Result.success()
+        } else {
+            Result.retry()
+        }
+    }
+
+    companion object {
+        const val KEY_PACKAGE = "package_name"
+        private const val MAX_RETRIES = 8
     }
 }
