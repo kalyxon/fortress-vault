@@ -15,7 +15,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
 
 class SentinelService : Service() {
 
@@ -36,23 +35,7 @@ class SentinelService : Service() {
                         break
                     }
                     VaultManager.verifyAndEnforce(applicationContext)
-                    try {
-                        val blocked = VaultManager.blockedPackages(applicationContext)
-                        if (blocked.isNotEmpty()) {
-                            val am = getSystemService(android.app.ActivityManager::class.java)
-                            val running = am.runningAppProcesses
-                            val foreground = running?.firstOrNull { it.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND }
-                            val fgPkg = foreground?.pkgList?.firstOrNull { it in blocked }
-                            if (fgPkg != null) {
-                                com.fortress.vault.ui.screens.AppLockActivity.start(applicationContext, fgPkg)
-                            }
-                        }
-                    } catch (_: Exception) {
-                    }
-                    updateNotification()
-                    // Stronger enforcement: poll frequently while sealed so
-                    // installs/updates/reinstalls are caught quickly.
-                    delay(15_000)
+                    delay(CHECK_INTERVAL_MS)
                 }
             }
         }
@@ -77,14 +60,11 @@ class SentinelService : Service() {
             .setContentTitle("Fortress Active")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_shield)
-            .setOngoing(true)
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
             .build()
-    }
-
-    private fun updateNotification() {
-        val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification())
     }
 
     override fun onDestroy() {
@@ -97,5 +77,6 @@ class SentinelService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 1001
+        private const val CHECK_INTERVAL_MS = 15 * 60 * 1_000L
     }
 }

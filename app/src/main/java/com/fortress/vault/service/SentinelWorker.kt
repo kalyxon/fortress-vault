@@ -17,8 +17,6 @@ class SentinelWorker(
             return Result.success()
         }
 
-        VaultManager.verifyAndEnforce(applicationContext)
-
         val serviceIntent = Intent(applicationContext, SentinelService::class.java)
         ContextCompat.startForegroundService(applicationContext, serviceIntent)
 
