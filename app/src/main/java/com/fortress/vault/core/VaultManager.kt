@@ -338,14 +338,23 @@ object VaultManager {
             dpm.setUninstallBlocked(admin, context.packageName, false)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
+            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
             // Release user-management restrictions when no seals are active.
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_ADD_USER)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
+            setUserControlDisabledPackages(dpm, admin, emptyList())
             return
         }
 
         dpm.setUninstallBlocked(admin, context.packageName, true)
         dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
+        dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+
+        setUserControlDisabledPackages(
+            dpm,
+            admin,
+            seals.flatMap { it.packages }.distinct()
+        )
 
         val anyBlockDebugging = seals.any { !it.allowAdb }
         if (anyBlockDebugging) {
@@ -373,8 +382,21 @@ object VaultManager {
             dpm.setUninstallBlocked(admin, context.packageName, false)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
+            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_ADD_USER)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
+            setUserControlDisabledPackages(dpm, admin, emptyList())
+        }
+    }
+
+    private fun setUserControlDisabledPackages(
+        dpm: DevicePolicyManager,
+        admin: android.content.ComponentName,
+        packages: List<String>
+    ) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return
+        runCatching {
+            dpm.setUserControlDisabledPackages(admin, packages)
         }
     }
 

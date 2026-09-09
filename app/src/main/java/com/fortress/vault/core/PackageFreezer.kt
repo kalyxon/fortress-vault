@@ -7,68 +7,110 @@ import android.os.UserHandle
 import android.os.UserManager
 import android.util.Log
 import com.fortress.vault.FortressAdminReceiver
+import java.util.concurrent.TimeUnit
 
 object PackageFreezer {
 
     private const val TAG = "PackageFreezer"
+    private val freezeLock = Any()
 
-    fun freezeAll(context: Context, packages: Set<String>) {
-        packages.forEach { freezeOne(context, it) }
+    fun freezeAll(context: Context, packages: Set<String>, retryOnFailure: Boolean = true) {
+        synchronized(freezeLock) {
+            packages.forEach { freezeOne(context, it, retryOnFailure) }
+        }
+    }
+
+    fun freezePackage(context: Context, packageName: String): Boolean = synchronized(freezeLock) {
+        freezeOne(context, packageName, retryOnFailure = false)
     }
 
     fun unfreezeAll(context: Context, packages: Set<String>) {
         packages.forEach { unfreezeOne(context, it) }
     }
 
-    private fun freezeOne(context: Context, packageName: String) {
+    private fun freezeOne(context: Context, packageName: String, retryOnFailure: Boolean): Boolean {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val admin = FortressAdminReceiver.getComponentName(context)
 
         if (!dpm.isDeviceOwnerApp(context.packageName)) {
             Log.w(TAG, "Not device owner — cannot freeze $packageName. See setup instructions.")
-            return
+            return false
         }
 
         val userContexts = allUserContexts(context)
         Log.i(TAG, "Freezing $packageName across ${userContexts.size} user profile(s)")
 
         // Apply to every user so guest / secondary accounts are also blocked.
+        var enforcedForEveryUser = true
         for (userContext in userContexts) {
             val userDpm = userContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
             val uId = userContext.userId()
             try {
-                // Ensure the package is installed in the target user space so freeze API works.
+                // Reinstall the package for this profile first when Android has
+                // not yet exposed it through the profile package manager.
                 runCatching {
                     val m = DevicePolicyManager::class.java.getMethod("installExistingPackage", android.content.ComponentName::class.java, String::class.java)
-                    m.invoke(userDpm, admin, packageName)
+                    m.invoke(userDpm, admin, packageName) as? Boolean
                 }.onFailure {
                     runCatching { dpm.installExistingPackage(admin, packageName) }
                 }
 
+                if (!isInstalledForUser(userContext, packageName)) {
+                    enforcedForEveryUser = false
+                    if (retryOnFailure) scheduleFreezeRetry(context, packageName)
+                    continue
+                }
+
+                userDpm.setUninstallBlocked(admin, packageName, true)
+                val uninstallBlocked = isUninstallBlocked(userDpm, admin, packageName)
                 val hiddenSuccess = userDpm.setApplicationHidden(admin, packageName, true)
                 val failed = userDpm.setPackagesSuspended(admin, arrayOf(packageName), true)
-                Log.d(TAG, "Freeze $packageName for user $uId: hidden=$hiddenSuccess, suspendFailed=${failed.joinToString()}")
-                if (failed.isNotEmpty()) {
+                val suspended = runCatching {
+                    userContext.packageManager.isPackageSuspended(packageName)
+                }.getOrDefault(false)
+                val enforced = uninstallBlocked && hiddenSuccess && failed.isEmpty() && suspended
+                Log.d(TAG, "Freeze $packageName for user $uId: uninstallBlocked=$uninstallBlocked, hidden=$hiddenSuccess, suspended=$suspended, suspendFailed=${failed.joinToString()}")
+                if (!enforced) {
+                    enforcedForEveryUser = false
+                }
+                if (!enforced && retryOnFailure) {
                     scheduleFreezeRetry(context, packageName)
                 }
             } catch (e: SecurityException) {
                 Log.e(TAG, "Failed to freeze $packageName for user $uId", e)
-                scheduleFreezeRetry(context, packageName)
+                enforcedForEveryUser = false
+                if (retryOnFailure) scheduleFreezeRetry(context, packageName)
             } catch (e: Exception) {
                 Log.w(TAG, "Unexpected error freezing $packageName for user $uId: ${e.message}")
+                enforcedForEveryUser = false
             }
         }
 
         // Revoke runtime permissions on the primary user context (device owner).
         revokeAllRuntimePermissions(context, dpm, admin, packageName)
+        return enforcedForEveryUser
     }
 
     private fun scheduleFreezeRetry(context: Context, packageName: String) {
         try {
             val work = androidx.work.OneTimeWorkRequestBuilder<com.fortress.vault.service.PackageChangeReinforceWorker>()
-                .setInitialDelay(2, java.util.concurrent.TimeUnit.SECONDS)
+                .setInitialDelay(3, TimeUnit.SECONDS)
+                .setBackoffCriteria(
+                    androidx.work.BackoffPolicy.LINEAR,
+                    10,
+                    TimeUnit.SECONDS
+                )
+                .setInputData(
+                    androidx.work.workDataOf(
+                        com.fortress.vault.service.PackageChangeReinforceWorker.KEY_PACKAGE to packageName
+                    )
+                )
                 .build()
-            androidx.work.WorkManager.getInstance(context).enqueue(work)
+            androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
+                "fortress_freeze_retry",
+                androidx.work.ExistingWorkPolicy.REPLACE,
+                work
+            )
         } catch (e: Exception) {
             Log.w(TAG, "Failed to schedule freeze retry for $packageName: ${e.message}")
         }
@@ -84,6 +126,7 @@ object PackageFreezer {
         for (userContext in allUserContexts(context)) {
             val userDpm = userContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
             try {
+                userDpm.setUninstallBlocked(admin, packageName, false)
                 userDpm.setApplicationHidden(admin, packageName, false)
                 userDpm.setPackagesSuspended(admin, arrayOf(packageName), false)
             } catch (e: Exception) {
@@ -119,6 +162,25 @@ object PackageFreezer {
             Log.w(TAG, "Package $packageName not found (may not be installed yet).")
         }
     }
+
+    private fun isInstalledForUser(context: Context, packageName: String): Boolean =
+        runCatching {
+            context.packageManager.getApplicationInfo(packageName, 0)
+            true
+        }.getOrDefault(false)
+
+    private fun isUninstallBlocked(
+        dpm: DevicePolicyManager,
+        admin: android.content.ComponentName,
+        packageName: String
+    ): Boolean = runCatching {
+        val method = DevicePolicyManager::class.java.getMethod(
+            "isUninstallBlocked",
+            android.content.ComponentName::class.java,
+            String::class.java
+        )
+        method.invoke(dpm, admin, packageName) as Boolean
+    }.getOrDefault(false)
 
     fun onPackageReinstalled(context: Context, packageName: String) {
         if (!VaultManager.isSealed(context)) return
@@ -181,19 +243,27 @@ object PackageFreezer {
 
             // 2. Try getUsers() via reflection (Device Owner MANAGE_USERS permission)
             runCatching {
-                val method = UserManager::class.java.getMethod("getUsers", Boolean::class.java)
+                val method = UserManager::class.java.getMethod(
+                    "getUsers",
+                    Boolean::class.javaPrimitiveType
+                )
                 @Suppress("UNCHECKED_CAST")
                 val usersList = method.invoke(um, true) as? List<*>
                 usersList?.forEach { userObj ->
                     if (userObj is UserHandle) {
                         addContextForUser(userObj)
                     } else if (userObj != null) {
-                        // UserInfo object on older APIs -> get UserHandle via UserInfo.getUserHandle()
-                        runCatching {
-                            val getUserHandleMethod = userObj.javaClass.getMethod("getUserHandle")
-                            val userHandle = getUserHandleMethod.invoke(userObj) as? UserHandle
-                            if (userHandle != null) addContextForUser(userHandle)
-                        }
+                        val userHandle = runCatching {
+                            userObj.javaClass.getMethod("getUserHandle")
+                                .invoke(userObj) as? UserHandle
+                        }.getOrNull() ?: runCatching {
+                            val idField = userObj.javaClass.getField("id")
+                            UserHandle::class.java.getMethod(
+                                "of",
+                                Int::class.javaPrimitiveType
+                            ).invoke(null, idField.getInt(userObj)) as? UserHandle
+                        }.getOrNull()
+                        if (userHandle != null) addContextForUser(userHandle)
                     }
                 }
             }
