@@ -10,6 +10,8 @@ import com.fortress.vault.FortressApplication
 import com.fortress.vault.MainActivity
 import com.fortress.vault.R
 import com.fortress.vault.core.VaultManager
+import com.fortress.vault.core.ControlManager
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,12 +31,23 @@ class SentinelService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (loopJob?.isActive != true) {
             loopJob = serviceScope.launch {
+                var lastTrustedVerification = 0L
                 while (true) {
-                    if (!VaultManager.isSealed(applicationContext)) {
+                    if (!VaultManager.isSealed(applicationContext) && ControlManager.activeLocks(applicationContext).isEmpty()) {
                         stopSelf()
                         break
                     }
-                    VaultManager.verifyAndEnforce(applicationContext)
+
+                    // Package broadcasts are the fast path. This scan is only
+                    // a recovery path for devices that drop PACKAGE_ADDED.
+                    ControlManager.enforceNewlyInstalledPackagesIfNeeded(applicationContext)
+
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastTrustedVerification >= TRUSTED_VERIFICATION_INTERVAL_MS) {
+                        VaultManager.verifyAndEnforce(applicationContext)
+                        ControlManager.apply(applicationContext)
+                        lastTrustedVerification = now
+                    }
                     delay(CHECK_INTERVAL_MS)
                 }
             }
@@ -77,6 +90,7 @@ class SentinelService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 1001
-        private const val CHECK_INTERVAL_MS = 15 * 60 * 1_000L
+        private const val CHECK_INTERVAL_MS = 60_000L
+        private const val TRUSTED_VERIFICATION_INTERVAL_MS = 15 * 60 * 1_000L
     }
 }
