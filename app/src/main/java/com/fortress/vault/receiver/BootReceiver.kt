@@ -7,6 +7,7 @@ import androidx.core.content.ContextCompat
 import com.fortress.vault.core.PackageFreezer
 import com.fortress.vault.core.PersistentVaultStore
 import com.fortress.vault.core.VaultManager
+import com.fortress.vault.core.ControlManager
 import com.fortress.vault.service.SentinelService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,8 +20,10 @@ class BootReceiver : BroadcastReceiver() {
             intent.action != Intent.ACTION_LOCKED_BOOT_COMPLETED
         ) return
 
-        if (!VaultManager.isSealed(context)) return
+        if (!VaultManager.isSealed(context) && ControlManager.activeLocks(context).isEmpty()) return
+        ControlManager.apply(context)
         val seals = PersistentVaultStore.read(context) ?: VaultManager.activeSeals(context)
+        VaultManager.enforceDeviceOwnerRestrictions(context)
         PackageFreezer.freezeAll(context, seals.flatMap { it.packages }.toSet())
 
         val serviceIntent = Intent(context, SentinelService::class.java)
