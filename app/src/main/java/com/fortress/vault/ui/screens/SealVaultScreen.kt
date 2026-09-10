@@ -20,8 +20,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import com.fortress.vault.core.MAX_SEAL_DURATION_DAYS
+import com.fortress.vault.core.MAX_APPS_PER_SEAL
 import com.fortress.vault.core.MIN_SEAL_DURATION_DAYS
-import com.fortress.vault.core.OnboardingPrefs
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.ui.theme.BrassPrimary
 import com.fortress.vault.ui.theme.CharcoalSurface
@@ -50,46 +50,13 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
     var durationDays by remember { mutableStateOf(30) }
     var recoveryPhrase by remember { mutableStateOf<String?>(null) }
     var pendingSeal by remember { mutableStateOf<com.fortress.vault.core.Seal?>(null) }
-    var allowAdb by remember { mutableStateOf(false) }
-    var blockUserSwitch by remember { mutableStateOf(false) }
     var hasWrittenDown by remember { mutableStateOf(false) }
     var isSealing by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Whether to show the user-switch preference dialog.
-    var showUserSwitchDialog by remember { mutableStateOf(false) }
-
     val installedApps = remember { loadLaunchableApps(context) }
     val sealByPackage = remember {
         VaultManager.activeSeals(context).flatMap { seal -> seal.packages.map { it to seal } }.toMap()
-    }
-
-    if (showUserSwitchDialog) {
-        UserSwitchBlockDialog(
-            onDecide = { block ->
-                blockUserSwitch = block
-                showUserSwitchDialog = false
-                isSealing = true
-                errorMessage = null
-                coroutineScope.launch {
-                    try {
-                        val (seal, phrase) = VaultManager.prepareSeal(
-                            context, selectedPackages, durationDays, allowAdb, block
-                        )
-                        recoveryPhrase = phrase
-                        pendingSeal = seal
-                        step = SealStep.CONFIRM_SEAL
-                    } catch (e: IllegalArgumentException) {
-                        errorMessage = e.message ?: "Couldn't create this seal."
-                    } finally {
-                        isSealing = false
-                    }
-                }
-            },
-            onDismiss = {
-                showUserSwitchDialog = false
-            }
-        )
     }
 
     Column(
@@ -103,7 +70,7 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                 Text("Choose What To Seal", style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Apps already sealed elsewhere are shown locked — use \"Add time\" on their card from Home instead.",
+                    "Select up to $MAX_APPS_PER_SEAL apps. Apps already sealed elsewhere are shown locked — use \"Add time\" on their card from Home instead.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -117,7 +84,11 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                             lockedRemainingLabel = lockedBySeal?.let { VaultManager.remainingLabelFor(context, it) },
                             onToggle = { checked ->
                                 selectedPackages = if (checked) {
-                                    selectedPackages + app.packageName
+                                    if (selectedPackages.size < MAX_APPS_PER_SEAL) {
+                                        selectedPackages + app.packageName
+                                    } else {
+                                        selectedPackages
+                                    }
                                 } else {
                                     selectedPackages - app.packageName
                                 }
@@ -147,62 +118,7 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                if (VaultManager.isUsbDebuggingCurrentlyEnabled(context)) {
-                    Spacer(Modifier.height(16.dp))
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(SteelSurfaceHigh),
-                        colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, EmberRed.copy(alpha = 0.4f))
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .background(EmberRed.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Block,
-                                        contentDescription = null,
-                                        tint = EmberRed,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    text = "USB Debugging Detected",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = TextPrimary
-                                )
-                            }
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                text = "USB debugging is currently enabled. A connected computer can bypass Fortress restrictions or uninstall the Device Owner admin. Turn it off in Settings → Developer options for full protection.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-                }
-
                 Spacer(Modifier.height(32.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = allowAdb,
-                        onCheckedChange = { allowAdb = it },
-                        colors = CheckboxDefaults.colors(checkedColor = BrassPrimary)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text("Allow USB debugging while sealed (unsafe)", style = MaterialTheme.typography.bodyMedium)
-                        Text("If enabled, a computer authorized for USB debugging can remove the admin and uninstall Fortress.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
                 Text("$durationDays days", style = MaterialTheme.typography.displayLarge, color = BrassPrimary)
                 Slider(
                     value = durationDays.toFloat(),
@@ -220,27 +136,20 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                     Button(
                         enabled = !isSealing,
                         onClick = {
-                            val shouldAsk = OnboardingPrefs.shouldAskAboutUserSwitch(context)
-                            if (shouldAsk) {
-                                // Show the dialog; it will trigger seal preparation on confirm.
-                                showUserSwitchDialog = true
-                            } else {
-                                // An existing active seal is already blocking user switching.
-                                isSealing = true
-                                errorMessage = null
-                                coroutineScope.launch {
-                                    try {
-                                        val (seal, phrase) = VaultManager.prepareSeal(
-                                            context, selectedPackages, durationDays, allowAdb, false
-                                        )
-                                        recoveryPhrase = phrase
-                                        pendingSeal = seal
-                                        step = SealStep.CONFIRM_SEAL
-                                    } catch (e: IllegalArgumentException) {
-                                        errorMessage = e.message ?: "Couldn't create this seal."
-                                    } finally {
-                                        isSealing = false
-                                    }
+                            isSealing = true
+                            errorMessage = null
+                            coroutineScope.launch {
+                                try {
+                                    val (seal, phrase) = VaultManager.prepareSeal(
+                                        context, selectedPackages, durationDays
+                                    )
+                                    recoveryPhrase = phrase
+                                    pendingSeal = seal
+                                    step = SealStep.CONFIRM_SEAL
+                                } catch (e: IllegalArgumentException) {
+                                    errorMessage = e.message ?: "Couldn't create this seal."
+                                } finally {
+                                    isSealing = false
                                 }
                             }
                         },

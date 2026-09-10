@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,7 +41,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 @Composable
-fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
+fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onSettings: () -> Unit) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
@@ -50,6 +51,7 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
     var addAppsTargetSealId by remember { mutableStateOf<String?>(null) }
     var pendingAddedApps by remember { mutableStateOf<Pair<String, Set<String>>?>(null) }
     var pendingExtension by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var sealActionError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -60,6 +62,11 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.End) {
+                IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Device controls") }
+            }
+        },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onSealVault,
@@ -174,13 +181,29 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
                 onDismiss = { pendingAddedApps = null },
                 onConfirm = {
                     coroutineScope.launch {
-                        VaultManager.addPackagesToSeal(context, seal.id, addedApps.second)
-                        seals = VaultManager.activeSeals(context)
+                        try {
+                            VaultManager.addPackagesToSeal(context, seal.id, addedApps.second)
+                            seals = VaultManager.activeSeals(context)
+                        } catch (error: Exception) {
+                            sealActionError = error.message ?: "Fortress could not add those apps to the seal."
+                        } finally {
+                            pendingAddedApps = null
+                        }
                     }
-                    pendingAddedApps = null
                 }
             )
         }
+    }
+
+    sealActionError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { sealActionError = null },
+            title = { Text("Apps were not added") },
+            text = { Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                TextButton(onClick = { sealActionError = null }) { Text("OK") }
+            }
+        )
     }
 }
 
@@ -273,90 +296,6 @@ private fun SealDetailDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                // ── Security badges ──────────────────────────────────────────
-                Spacer(Modifier.height(12.dp))
-                // USB Debugging badge
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (seal.allowAdb) EmberRed.copy(alpha = 0.10f)
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(
-                        imageVector = if (seal.allowAdb) Icons.Filled.Warning else Icons.Filled.Shield,
-                        contentDescription = null,
-                        tint = if (seal.allowAdb) EmberRed else BrassPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            if (seal.allowAdb) "USB debugging: allowed" else "USB debugging: blocked",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (seal.allowAdb) EmberRed else BrassPrimary
-                        )
-                        Text(
-                            if (seal.allowAdb)
-                                "⚠ A connected computer can bypass this seal."
-                            else
-                                "ADB access is restricted for the duration.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                // User-switching badge
-                val isSystemSwitchBlocked = remember(seal) {
-                    VaultManager.activeSeals(context).any { it.blockUserSwitch }
-                }
-                val isBlockedForThisSealOrActive = seal.blockUserSwitch || isSystemSwitchBlocked
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (isBlockedForThisSealOrActive) MaterialTheme.colorScheme.surfaceVariant
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isBlockedForThisSealOrActive) Icons.Filled.Block else Icons.Filled.Shield,
-                        contentDescription = null,
-                        tint = if (isBlockedForThisSealOrActive) BrassPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            if (isBlockedForThisSealOrActive) "User switching: blocked" else "User switching: allowed",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isBlockedForThisSealOrActive) BrassPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            if (seal.blockUserSwitch)
-                                "Switching to Guest or secondary profiles is disabled by this seal."
-                            else if (isSystemSwitchBlocked)
-                                "Switching is currently blocked on this device by another active seal."
-                            else
-                                "Apps are frozen in all accounts, but switching is allowed.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                // ─────────────────────────────────────────────────────────────
 
                 Spacer(Modifier.height(12.dp))
                 LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
