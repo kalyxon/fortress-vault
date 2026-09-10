@@ -1,7 +1,10 @@
 package com.fortress.vault.core
 
 import android.app.admin.DevicePolicyManager
+import android.app.ActivityManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.UserHandle
 import android.os.UserManager
@@ -14,9 +17,10 @@ object PackageFreezer {
     private const val TAG = "PackageFreezer"
     private val freezeLock = Any()
 
-    fun freezeAll(context: Context, packages: Set<String>, retryOnFailure: Boolean = true) {
+    fun freezeAll(context: Context, packages: Set<String>, retryOnFailure: Boolean = true): Boolean {
         synchronized(freezeLock) {
-            packages.forEach { freezeOne(context, it, retryOnFailure) }
+            val userContexts = allUserContexts(context)
+            return packages.all { freezeOne(context, it, retryOnFailure, userContexts) }
         }
     }
 
@@ -24,11 +28,53 @@ object PackageFreezer {
         freezeOne(context, packageName, retryOnFailure = false)
     }
 
+    fun quarantineNewPackage(context: Context, packageName: String): Boolean = synchronized(freezeLock) {
+        freezeOne(
+            context,
+            packageName,
+            retryOnFailure = false,
+            userContexts = allUserContexts(context),
+            protectUninstall = false,
+            hidePackage = false
+        )
+    }
+
+    fun uninstallNewPackage(context: Context, packageName: String): Boolean {
+        if (packageName == context.packageName) return false
+        val callback = Intent(context, com.fortress.vault.receiver.PackageChangeReceiver::class.java).apply {
+            action = com.fortress.vault.receiver.PackageChangeReceiver.ACTION_UNINSTALL_RESULT
+            putExtra(com.fortress.vault.receiver.PackageChangeReceiver.EXTRA_PACKAGE_NAME, packageName)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            packageName.hashCode(),
+            callback,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return runCatching {
+            context.packageManager.packageInstaller.uninstall(packageName, pendingIntent.intentSender)
+            true
+        }.onFailure { error ->
+            Log.e(TAG, "Could not uninstall newly installed package $packageName", error)
+        }.getOrDefault(false)
+    }
+
     fun unfreezeAll(context: Context, packages: Set<String>) {
         packages.forEach { unfreezeOne(context, it) }
     }
 
     private fun freezeOne(context: Context, packageName: String, retryOnFailure: Boolean): Boolean {
+        return freezeOne(context, packageName, retryOnFailure, allUserContexts(context))
+    }
+
+    private fun freezeOne(
+        context: Context,
+        packageName: String,
+        retryOnFailure: Boolean,
+        userContexts: List<Context>,
+        protectUninstall: Boolean = true,
+        hidePackage: Boolean = true
+    ): Boolean {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val admin = FortressAdminReceiver.getComponentName(context)
 
@@ -37,14 +83,15 @@ object PackageFreezer {
             return false
         }
 
-        val userContexts = allUserContexts(context)
         Log.i(TAG, "Freezing $packageName across ${userContexts.size} user profile(s)")
 
         // Apply to every user so guest / secondary accounts are also blocked.
         var enforcedForEveryUser = true
         for (userContext in userContexts) {
-            val userDpm = userContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
             val uId = userContext.userId()
+            val userDpm = if (uId == context.userId()) dpm else {
+                userContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            }
             try {
                 // Reinstall the package for this profile first when Android has
                 // not yet exposed it through the profile package manager.
@@ -61,14 +108,29 @@ object PackageFreezer {
                     continue
                 }
 
-                userDpm.setUninstallBlocked(admin, packageName, true)
-                val uninstallBlocked = isUninstallBlocked(userDpm, admin, packageName)
-                val hiddenSuccess = userDpm.setApplicationHidden(admin, packageName, true)
+                if (protectUninstall) {
+                    userDpm.setUninstallBlocked(admin, packageName, true)
+                }
+                val uninstallBlocked = !protectUninstall || isUninstallBlocked(userDpm, admin, packageName)
                 val failed = userDpm.setPackagesSuspended(admin, arrayOf(packageName), true)
                 val suspended = runCatching {
                     userContext.packageManager.isPackageSuspended(packageName)
                 }.getOrDefault(false)
-                val enforced = uninstallBlocked && hiddenSuccess && failed.isEmpty() && suspended
+                val hiddenSuccess = if (hidePackage) {
+                    runCatching {
+                        userDpm.setApplicationHidden(admin, packageName, true)
+                    }.getOrDefault(false)
+                } else {
+                    true
+                }
+                runCatching {
+                    val activityManager = userContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                    ActivityManager::class.java.getMethod("forceStopPackage", String::class.java)
+                        .invoke(activityManager, packageName)
+                }.onFailure { error ->
+                    Log.w(TAG, "Could not stop already-running $packageName for user $uId: ${error.message}")
+                }
+                val enforced = uninstallBlocked && failed.isEmpty() && suspended
                 Log.d(TAG, "Freeze $packageName for user $uId: uninstallBlocked=$uninstallBlocked, hidden=$hiddenSuccess, suspended=$suspended, suspendFailed=${failed.joinToString()}")
                 if (!enforced) {
                     enforcedForEveryUser = false
