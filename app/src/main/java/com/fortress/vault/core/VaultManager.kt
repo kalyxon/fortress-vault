@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit
 
 const val MIN_SEAL_DURATION_DAYS = 1
 const val MAX_SEAL_DURATION_DAYS = 365
+const val MAX_APPS_PER_SEAL = 20
 
 object VaultManager {
 
@@ -63,6 +64,11 @@ object VaultManager {
     fun blockedPackages(context: Context): Set<String> =
         activeSeals(context).flatMap { it.packages }.toSet()
 
+    fun enforceDeviceOwnerRestrictions(context: Context) {
+        init(context)
+        updateDeviceOwnerRestrictions(context)
+    }
+
     fun sealFor(context: Context, packageName: String): Seal? =
         activeSeals(context).firstOrNull { packageName in it.packages }
 
@@ -101,16 +107,28 @@ object VaultManager {
         ) == 1
     }.getOrDefault(false)
 
-    suspend fun createSeal(context: Context, packages: Set<String>, durationDays: Int, allowAdb: Boolean = false, blockUserSwitch: Boolean = false): Pair<String, String> {
-        val (seal, phrase) = prepareSeal(context, packages, durationDays, allowAdb, blockUserSwitch)
+    suspend fun createSeal(context: Context, packages: Set<String>, durationDays: Int): Pair<String, String> {
+        check(DeviceSecurity.hasSecureLock(context)) {
+            "Set a secure phone lock before creating a seal."
+        }
+        val (seal, phrase) = prepareSeal(context, packages, durationDays)
         commitSeal(context, seal)
         return seal.id to phrase
     }
 
-    suspend fun prepareSeal(context: Context, packages: Set<String>, durationDays: Int, allowAdb: Boolean = false, blockUserSwitch: Boolean = false): Pair<Seal, String> {
+    suspend fun prepareSeal(context: Context, packages: Set<String>, durationDays: Int): Pair<Seal, String> {
+        check(DeviceSecurity.hasSecureLock(context)) {
+            "Set a secure phone lock before creating a seal."
+        }
+        check(DeviceSecurity.hasSecureLock(context)) {
+            "Set a secure phone lock before creating a seal."
+        }
         init(context)
         require(durationDays in MIN_SEAL_DURATION_DAYS..MAX_SEAL_DURATION_DAYS) {
             "Seal duration must be between $MIN_SEAL_DURATION_DAYS and $MAX_SEAL_DURATION_DAYS days."
+        }
+        require(packages.size <= MAX_APPS_PER_SEAL) {
+            "A seal can include at most $MAX_APPS_PER_SEAL apps."
         }
 
         val alreadySealed = blockedPackages(context)
@@ -131,19 +149,22 @@ object VaultManager {
             lastKnownGoodMillis = networkTime,
             recoverySalt = hashed.saltHex,
             recoveryHash = hashed.hashHex,
-            allowAdb = allowAdb,
-            blockUserSwitch = blockUserSwitch
         )
 
         return seal to recoveryPhrase
     }
 
     suspend fun commitSeal(context: Context, seal: Seal) {
+        check(DeviceSecurity.hasSecureLock(context)) {
+            "Set a secure phone lock before creating a seal."
+        }
         init(context)
+        check(PackageFreezer.freezeAll(context, seal.packages)) {
+            "Fortress could not block one or more selected apps. The seal was not created. Confirm Fortress is Device Owner and try again."
+        }
         synchronized(lock) {
             saveSeals(context, activeSeals(context) + seal)
         }
-        PackageFreezer.freezeAll(context, seal.packages)
         SentinelController.start(context)
     }
 
@@ -166,19 +187,31 @@ object VaultManager {
         init(context)
         require(newPackages.isNotEmpty()) { "No apps selected to add to this seal." }
 
-        val updated: Seal
+        val validPackages: Set<String>
         synchronized(lock) {
             val seals = activeSeals(context)
             val target = seals.firstOrNull { it.id == sealId } ?: return
 
             val alreadyBlocked = blockedPackages(context) - target.packages
-            val validPackages = newPackages - alreadyBlocked
+            validPackages = newPackages - alreadyBlocked - target.packages
             require(validPackages.isNotEmpty()) { "All selected apps are already sealed elsewhere or already in this seal." }
+            require(target.packages.size + validPackages.size <= MAX_APPS_PER_SEAL) {
+                "A seal can include at most $MAX_APPS_PER_SEAL apps."
+            }
+        }
 
-            updated = target.copy(packages = target.packages + validPackages)
+        val enforced = PackageFreezer.freezeAll(context, validPackages)
+        if (!enforced) {
+            PackageFreezer.unfreezeAll(context, validPackages)
+            error("Fortress could not block one or more selected apps. The seal was not changed. Confirm Fortress is Device Owner and try again.")
+        }
+
+        synchronized(lock) {
+            val seals = activeSeals(context)
+            val target = seals.firstOrNull { it.id == sealId } ?: return
+            val updated = target.copy(packages = target.packages + validPackages)
             saveSeals(context, seals.map { if (it.id == sealId) updated else it })
         }
-        PackageFreezer.freezeAll(context, updated.packages)
     }
 
     suspend fun verifyAndEnforce(context: Context) {
@@ -190,23 +223,6 @@ object VaultManager {
         synchronized(lock) {
             val seals = activeSeals(context)
             if (seals.isEmpty()) return
-
-            try {
-                if (isUsbDebuggingCurrentlyEnabled(context)) {
-                    val offenders = seals.filter { !it.allowAdb }
-                    if (offenders.isNotEmpty()) {
-                        val extended = seals.map { seal ->
-                            if (!seal.allowAdb) seal.copy(unlockAtMillis = seal.unlockAtMillis + TimeUnit.HOURS.toMillis(24))
-                            else seal
-                        }
-                        Log.i("VaultManager", "USB debugging detected while sealed — extending ${offenders.size} seal(s) by 24h")
-                        saveSeals(context, extended)
-                        PackageFreezer.freezeAll(context, extended.flatMap { it.packages }.toSet())
-                        WelcomeBackNotifier.show(context, "USB debugging detected while sealed — affected seals extended by 24h.")
-                    }
-                }
-            } catch (_: Exception) {
-            }
 
             val (expired, stillActive) = seals.partition { networkTime >= it.unlockAtMillis }
 
@@ -277,7 +293,9 @@ object VaultManager {
                 if (remaining.isEmpty()) {
                     WelcomeBackNotifier.clear(context)
                     releaseDeviceOwnerLock(context)
-                    SentinelController.stop(context)
+                    if (ControlManager.activeLocks(context).isEmpty()) {
+                        SentinelController.stop(context)
+                    }
                 }
                 return true
             }
@@ -337,33 +355,21 @@ object VaultManager {
         if (seals.isEmpty()) {
             dpm.setUninstallBlocked(admin, context.packageName, false)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
-            // Release user-management restrictions when no seals are active.
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_ADD_USER)
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
+            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+            // Release seal-owned restrictions when no seals are active.
+            setUserControlDisabledPackages(dpm, admin, emptyList())
             return
         }
 
         dpm.setUninstallBlocked(admin, context.packageName, true)
         dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
+        dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+        setUserControlDisabledPackages(
+            dpm,
+            admin,
+            seals.flatMap { it.packages }.distinct()
+        )
 
-        val anyBlockDebugging = seals.any { !it.allowAdb }
-        if (anyBlockDebugging) {
-            dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
-        } else {
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
-        }
-
-        // Block adding new users while any seal is active (closes the "create new user" bypass).
-        dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_ADD_USER)
-
-        // Block user-switching only if at least one active seal requests it.
-        val anyBlockSwitch = seals.any { it.blockUserSwitch }
-        if (anyBlockSwitch) {
-            dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
-        } else {
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
-        }
     }
 
     private fun releaseDeviceOwnerLock(context: Context) {
@@ -372,9 +378,19 @@ object VaultManager {
         if (dpm.isDeviceOwnerApp(context.packageName)) {
             dpm.setUninstallBlocked(admin, context.packageName, false)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_ADD_USER)
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_USER_SWITCH)
+            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+            setUserControlDisabledPackages(dpm, admin, emptyList())
+        }
+    }
+
+    private fun setUserControlDisabledPackages(
+        dpm: DevicePolicyManager,
+        admin: android.content.ComponentName,
+        packages: List<String>
+    ) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return
+        runCatching {
+            dpm.setUserControlDisabledPackages(admin, packages)
         }
     }
 

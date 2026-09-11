@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,9 +35,13 @@ import com.fortress.vault.ui.theme.CountdownStyle
 import com.fortress.vault.ui.theme.EmberRed
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 @Composable
-fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
+fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onSettings: () -> Unit) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
@@ -44,6 +49,9 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
     var extendTargetSealId by remember { mutableStateOf<String?>(null) }
     var detailsSealId by remember { mutableStateOf<String?>(null) }
     var addAppsTargetSealId by remember { mutableStateOf<String?>(null) }
+    var pendingAddedApps by remember { mutableStateOf<Pair<String, Set<String>>?>(null) }
+    var pendingExtension by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var sealActionError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -54,6 +62,11 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.End) {
+                IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Device controls") }
+            }
+        },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onSealVault,
@@ -103,13 +116,29 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
         ExtendSealDialog(
             onDismiss = { extendTargetSealId = null },
             onConfirm = { extraDays ->
-                coroutineScope.launch {
-                    VaultManager.extendSeal(context, extendTarget, extraDays)
-                    seals = VaultManager.activeSeals(context)
-                }
+                pendingExtension = extendTarget to extraDays
                 extendTargetSealId = null
             }
         )
+    }
+
+    val extension = pendingExtension
+    if (extension != null) {
+        val seal = seals.firstOrNull { it.id == extension.first }
+        if (seal != null) {
+            ExtendSealConfirmationDialog(
+                seal = seal,
+                extraDays = extension.second,
+                onDismiss = { pendingExtension = null },
+                onConfirm = {
+                    coroutineScope.launch {
+                        VaultManager.extendSeal(context, seal.id, extension.second)
+                        seals = VaultManager.activeSeals(context)
+                    }
+                    pendingExtension = null
+                }
+            )
+        }
     }
 
     if (detailsSealId != null) {
@@ -134,12 +163,45 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit) {
             context = context,
             onDismiss = { addAppsTargetSealId = null },
             onConfirm = { selected ->
-                coroutineScope.launch {
-                    VaultManager.addPackagesToSeal(context, addAppsTarget, selected)
-                    seals = VaultManager.activeSeals(context)
-                }
+                pendingAddedApps = addAppsTarget to selected
                 addAppsTargetSealId = null
                 detailsSealId = null
+            }
+        )
+    }
+
+    val addedApps = pendingAddedApps
+    if (addedApps != null) {
+        val seal = seals.firstOrNull { it.id == addedApps.first }
+        if (seal != null) {
+            AddAppsConfirmationDialog(
+                seal = seal,
+                packageNames = addedApps.second,
+                context = context,
+                onDismiss = { pendingAddedApps = null },
+                onConfirm = {
+                    coroutineScope.launch {
+                        try {
+                            VaultManager.addPackagesToSeal(context, seal.id, addedApps.second)
+                            seals = VaultManager.activeSeals(context)
+                        } catch (error: Exception) {
+                            sealActionError = error.message ?: "Fortress could not add those apps to the seal."
+                        } finally {
+                            pendingAddedApps = null
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    sealActionError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { sealActionError = null },
+            title = { Text("Apps were not added") },
+            text = { Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                TextButton(onClick = { sealActionError = null }) { Text("OK") }
             }
         )
     }
@@ -234,90 +296,6 @@ private fun SealDetailDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                // ── Security badges ──────────────────────────────────────────
-                Spacer(Modifier.height(12.dp))
-                // USB Debugging badge
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (seal.allowAdb) EmberRed.copy(alpha = 0.10f)
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(
-                        imageVector = if (seal.allowAdb) Icons.Filled.Warning else Icons.Filled.Shield,
-                        contentDescription = null,
-                        tint = if (seal.allowAdb) EmberRed else BrassPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            if (seal.allowAdb) "USB debugging: allowed" else "USB debugging: blocked",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (seal.allowAdb) EmberRed else BrassPrimary
-                        )
-                        Text(
-                            if (seal.allowAdb)
-                                "⚠ A connected computer can bypass this seal."
-                            else
-                                "ADB access is restricted for the duration.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                // User-switching badge
-                val isSystemSwitchBlocked = remember(seal) {
-                    VaultManager.activeSeals(context).any { it.blockUserSwitch }
-                }
-                val isBlockedForThisSealOrActive = seal.blockUserSwitch || isSystemSwitchBlocked
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (isBlockedForThisSealOrActive) MaterialTheme.colorScheme.surfaceVariant
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isBlockedForThisSealOrActive) Icons.Filled.Block else Icons.Filled.Shield,
-                        contentDescription = null,
-                        tint = if (isBlockedForThisSealOrActive) BrassPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            if (isBlockedForThisSealOrActive) "User switching: blocked" else "User switching: allowed",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isBlockedForThisSealOrActive) BrassPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            if (seal.blockUserSwitch)
-                                "Switching to Guest or secondary profiles is disabled by this seal."
-                            else if (isSystemSwitchBlocked)
-                                "Switching is currently blocked on this device by another active seal."
-                            else
-                                "Apps are frozen in all accounts, but switching is allowed.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                // ─────────────────────────────────────────────────────────────
 
                 Spacer(Modifier.height(12.dp))
                 LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
@@ -426,6 +404,50 @@ private fun AddAppsToSealDialog(
 }
 
 @Composable
+private fun AddAppsConfirmationDialog(
+    seal: Seal,
+    packageNames: Set<String>,
+    context: android.content.Context,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    val labels = packageNames.map { packageName ->
+        runCatching {
+            context.packageManager.getApplicationLabel(
+                context.packageManager.getApplicationInfo(packageName, 0)
+            ).toString()
+        }.getOrDefault(packageName)
+    }.sorted()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Confirm apps to add") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("These apps will be added to the existing seal and blocked until the current unlock date:")
+                Spacer(Modifier.height(12.dp))
+                labels.forEach { label ->
+                    Text("- $label", style = MaterialTheme.typography.bodyLarge)
+                    Spacer(Modifier.height(4.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Unlock date: ${formatSealDate(seal.unlockAtMillis)}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = BrassPrimary
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Confirm and add", color = BrassPrimary) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Back") }
+        }
+    )
+}
+
+@Composable
 private fun AppIconRow(context: android.content.Context, packages: Set<String>) {
     val uniquePackages = packages.toList().distinct()
     Row {
@@ -489,3 +511,40 @@ private fun ExtendSealDialog(onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
         }
     )
 }
+
+@Composable
+private fun ExtendSealConfirmationDialog(
+    seal: Seal,
+    extraDays: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    val newUnlockAt = seal.unlockAtMillis + TimeUnit.DAYS.toMillis(extraDays.toLong())
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Confirm added time") },
+        text = {
+            Column {
+                Text("Add $extraDays day${if (extraDays == 1) "" else "s"} to this seal?")
+                Spacer(Modifier.height(12.dp))
+                Text("Current unlock date: ${formatSealDate(seal.unlockAtMillis)}")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "New unlock date: ${formatSealDate(newUnlockAt)}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = BrassPrimary
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Confirm added time", color = BrassPrimary) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Back") }
+        }
+    )
+}
+
+private fun formatSealDate(epochMillis: Long): String =
+    SimpleDateFormat("EEE, d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(epochMillis))

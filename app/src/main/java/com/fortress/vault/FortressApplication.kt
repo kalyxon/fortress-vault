@@ -4,9 +4,23 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import androidx.work.Configuration
+import androidx.work.WorkManager
+import com.fortress.vault.core.PackageFreezer
+import com.fortress.vault.core.PersistentVaultStore
 import com.fortress.vault.core.VaultManager
+import com.fortress.vault.core.SentinelController
+import com.fortress.vault.core.ControlManager
+import com.fortress.vault.service.PackageChangeReinforceWorker
+import java.util.concurrent.Executors
 
-class FortressApplication : Application() {
+class FortressApplication : Application(), Configuration.Provider {
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setExecutor(Executors.newSingleThreadExecutor())
+            .setMaxSchedulerLimit(1)
+            .build()
 
     override fun onCreate() {
         super.onCreate()
@@ -14,6 +28,18 @@ class FortressApplication : Application() {
         // VaultManager is our single source of truth for sealed/unsealed state.
         // Everything else (freezer, sentinel, boot receiver, UI) reads from it.
         VaultManager.init(this)
+        ControlManager.apply(this)
+        val persistedSeals = PersistentVaultStore.read(this)
+        val seals = persistedSeals ?: VaultManager.activeSeals(this)
+        VaultManager.enforceDeviceOwnerRestrictions(this)
+        if (seals.isNotEmpty() || ControlManager.activeLocks(this).isNotEmpty()) {
+            PackageFreezer.freezeAll(this, seals.flatMap { it.packages }.toSet())
+            runCatching { SentinelController.start(this) }
+        }
+        WorkManager.getInstance(this).apply {
+            cancelAllWorkByTag(PackageChangeReinforceWorker::class.java.name)
+            pruneWork()
+        }
 
         createNotificationChannel()
     }

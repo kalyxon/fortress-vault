@@ -46,7 +46,7 @@
         <!-- Re-applies freeze state immediately on every boot -->
         <receiver
             android:name=".receiver.BootReceiver"
-            android:exported="true"
+            android:exported="false"
             android:directBootAware="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
@@ -57,14 +57,14 @@
         <!-- Instantly re-freezes blocked apps if the user reinstalls or updates them -->
         <receiver
             android:name=".receiver.PackageChangeReceiver"
-            android:exported="true"
+            android:exported="false"
             android:directBootAware="true">
             <intent-filter>
                 <action android:name="android.intent.action.PACKAGE_ADDED" />
                 <action android:name="android.intent.action.PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.PACKAGE_CHANGED" />
-                <action android:name="android.intent.action.PACKAGE_REMOVED" />
                 <action android:name="android.intent.action.PACKAGE_RESTARTED" />
+                <action android:name="android.intent.action.PACKAGE_REMOVED" />
                 <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
                 <data android:scheme="package" />
             </intent-filter>
@@ -82,7 +82,7 @@
 
         <activity
             android:name=".ui.screens.AppLockActivity"
-            android:exported="true"
+            android:exported="false"
             android:taskAffinity="">
         </activity>
 

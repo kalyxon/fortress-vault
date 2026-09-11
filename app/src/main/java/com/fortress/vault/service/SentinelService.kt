@@ -10,12 +10,13 @@ import com.fortress.vault.FortressApplication
 import com.fortress.vault.MainActivity
 import com.fortress.vault.R
 import com.fortress.vault.core.VaultManager
+import com.fortress.vault.core.ControlManager
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
 
 class SentinelService : Service() {
 
@@ -30,29 +31,24 @@ class SentinelService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (loopJob?.isActive != true) {
             loopJob = serviceScope.launch {
+                var lastTrustedVerification = 0L
                 while (true) {
-                    if (!VaultManager.isSealed(applicationContext)) {
+                    if (!VaultManager.isSealed(applicationContext) && ControlManager.activeLocks(applicationContext).isEmpty()) {
                         stopSelf()
                         break
                     }
-                    VaultManager.verifyAndEnforce(applicationContext)
-                    try {
-                        val blocked = VaultManager.blockedPackages(applicationContext)
-                        if (blocked.isNotEmpty()) {
-                            val am = getSystemService(android.app.ActivityManager::class.java)
-                            val running = am.runningAppProcesses
-                            val foreground = running?.firstOrNull { it.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND }
-                            val fgPkg = foreground?.pkgList?.firstOrNull { it in blocked }
-                            if (fgPkg != null) {
-                                com.fortress.vault.ui.screens.AppLockActivity.start(applicationContext, fgPkg)
-                            }
-                        }
-                    } catch (_: Exception) {
+
+                    // Package broadcasts are the fast path. This scan is only
+                    // a recovery path for devices that drop PACKAGE_ADDED.
+                    ControlManager.enforceNewlyInstalledPackagesIfNeeded(applicationContext)
+
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastTrustedVerification >= TRUSTED_VERIFICATION_INTERVAL_MS) {
+                        VaultManager.verifyAndEnforce(applicationContext)
+                        ControlManager.apply(applicationContext)
+                        lastTrustedVerification = now
                     }
-                    updateNotification()
-                    // Stronger enforcement: poll frequently while sealed so
-                    // installs/updates/reinstalls are caught quickly.
-                    delay(15_000)
+                    delay(CHECK_INTERVAL_MS)
                 }
             }
         }
@@ -77,14 +73,11 @@ class SentinelService : Service() {
             .setContentTitle("Fortress Active")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_shield)
-            .setOngoing(true)
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
             .build()
-    }
-
-    private fun updateNotification() {
-        val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification())
     }
 
     override fun onDestroy() {
@@ -97,5 +90,7 @@ class SentinelService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 1001
+        private const val CHECK_INTERVAL_MS = 60_000L
+        private const val TRUSTED_VERIFICATION_INTERVAL_MS = 15 * 60 * 1_000L
     }
 }

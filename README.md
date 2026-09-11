@@ -12,8 +12,16 @@ device and Android version you plan to use.
 ## What it does
 
 - Lets you choose installed apps to block.
+- Limits each seal to 20 apps to keep policy enforcement responsive.
 - Seals those apps until the configured unlock time.
 - Restores the sealed state after reboot and app replacement.
+- Offers independent device controls for USB debugging, user accounts, and app
+  installation changes, each protected by its own timer and recovery phrase.
+- Requires a secure phone lock (PIN, password, or pattern) before the vault or
+  device controls can be used.
+- Requires device-credential verification each time Fortress returns to the
+  foreground, so opening the app itself is protected by the phone's PIN,
+  password, or pattern.
 - Uses network time checks to make local clock changes less useful.
 - Provides an emergency recovery phrase generated from the BIP39 word list.
 - Keeps a system-held copy of important sealed-state data to help it survive
@@ -98,6 +106,13 @@ data. Factory reset erases the device, so back up anything important first.
 Follow the in-app setup, choose the packages to block, set an unlock time,
 and store the recovery phrase somewhere secure and offline.
 
+Fortress also requires a secure phone lock. After Device Owner setup, if the
+phone does not have a PIN, password, or pattern, Fortress opens the Android
+security settings and keeps seals and device controls unavailable until one is
+configured.
+After a secure lock exists, Fortress requests device-credential verification
+before showing the vault and asks again when the app returns to the foreground.
+
 For a fuller installation walkthrough and troubleshooting notes, see
 [`INSTALLATION.md`](INSTALLATION.md).
 
@@ -110,12 +125,13 @@ app/src/main/java/com/fortress/vault/
 ├── MainActivity.kt                # Compose NavHost: Setup → Home → Seal/Emergency
 ├── core/
 │   ├── VaultManager.kt            # single source of truth for sealed state
+│   ├── DeviceSecurity.kt          # secure phone-lock prerequisite
 │   ├── PackageFreezer.kt          # Layer 2 — hide app + strip permissions
 │   ├── TimeKeeper.kt              # Layer 3 — network-time verification
 │   ├── SentinelController.kt      # starts/stops service + WorkManager backup
 │   └── RecoveryPhraseGenerator.kt # emergency-unlock phrase
 ├── service/
-│   ├── SentinelService.kt         # Layer 4 — foreground watchdog
+│   ├── SentinelService.kt         # Layer 4 — low-frequency foreground watchdog
 │   └── SentinelWorker.kt          # WorkManager dead-man's-switch
 ├── receiver/
 │   ├── BootReceiver.kt            # re-freeze before launcher loads
@@ -137,6 +153,28 @@ app/src/main/java/com/fortress/vault/
 - Android manufacturers and versions can handle policy persistence and
   background execution differently. Test the complete seal and emergency
   unlock flow on the target device.
+- A secure phone lock is mandatory for use after Device Owner setup. Fortress
+  checks Android's `KeyguardManager.isKeyguardSecure`; removing the phone lock
+  gates the UI again and core seal/control operations reject new changes.
+- The app-change control defaults to update-friendly mode: existing apps can
+  update, while newly installed packages are suspended and removed. This mode
+  is limited to 90 days. Package broadcasts are the fast path; a low-frequency
+  watchdog is a recovery path for devices that miss package broadcasts.
+- The optional full-block mode is limited to 30 days and applies Android's
+  `DISALLOW_INSTALL_APPS` and `DISALLOW_UNINSTALL_APPS` restrictions. It blocks
+  new installs, app updates, and user uninstalls for the duration.
+- Android does not expose a public policy that can reject only new installs
+  while allowing replacements. Update-friendly mode can therefore have a
+  brief interval before a new package is detected and removed. OTA/system
+  updates use a separate privileged path.
+- Active seal packages are suspended, hidden, uninstall-protected, and
+  re-frozen after package-change events. Runtime permissions are revoked when
+  Fortress freezes a package.
+- Background enforcement is not free: Fortress uses a foreground service while
+  protection is active. Package events handle immediate changes; the fallback
+  scan runs once per minute and trusted network-time verification runs every
+  15 minutes. Actual behavior varies by Android manufacturer and battery
+  optimization settings.
 
 ## License
 
