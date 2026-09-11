@@ -37,6 +37,7 @@ object ControlManager {
     private const val LOCKS_JSON = "locks_json"
     private const val BLOCKED_NEW_PACKAGES = "blocked_new_packages"
     private const val INSTALL_BASELINE_PACKAGES = "install_baseline_packages"
+    private const val LEGACY_PROTECTED_UNINSTALL_PACKAGES = "protected_uninstall_packages"
     private val lock = Any()
     private lateinit var prefs: android.content.SharedPreferences
 
@@ -156,12 +157,16 @@ object ControlManager {
         val appChangeLock = active.firstOrNull { it.control == DeviceControl.APP_INSTALLS }
         val isBlockingAppChanges = appChangeLock != null
         val fullAppChangeBlock = appChangeLock?.fullAppChangeBlock == true
+        if (!isBlockingAppChanges) {
+            clearProtectedUninstallPackages(context, dpm, admin)
+        }
         if (active.size != allLocks.size) {
             synchronized(lock) { save(active) }
         }
         if (wasBlockingAppChanges && !isBlockingAppChanges) {
             val packages = prefs.getStringSet(BLOCKED_NEW_PACKAGES, emptySet()).orEmpty()
             PackageFreezer.unfreezeAll(context, packages - VaultManager.blockedPackages(context))
+            clearProtectedUninstallPackages(context, dpm, admin)
             prefs.edit()
                 .remove(BLOCKED_NEW_PACKAGES)
                 .remove(INSTALL_BASELINE_PACKAGES)
@@ -183,6 +188,42 @@ object ControlManager {
         setRestriction(dpm, admin, UserManager.DISALLOW_USER_SWITCH, DeviceControl.USER_ACCOUNTS in controls)
         setRestriction(dpm, admin, UserManager.DISALLOW_INSTALL_APPS, fullAppChangeBlock)
         setRestriction(dpm, admin, UserManager.DISALLOW_UNINSTALL_APPS, fullAppChangeBlock)
+        if (isBlockingAppChanges && !fullAppChangeBlock) {
+            protectBaselinePackages(context, dpm, admin)
+        }
+    }
+
+    private fun protectBaselinePackages(
+        context: Context,
+        dpm: DevicePolicyManager,
+        admin: android.content.ComponentName
+    ) {
+        val baseline = prefs.getStringSet(INSTALL_BASELINE_PACKAGES, emptySet()).orEmpty()
+        val protected = prefs.getStringSet(LEGACY_PROTECTED_UNINSTALL_PACKAGES, emptySet()).orEmpty()
+        val packagesToProtect = baseline + protected
+        if (packagesToProtect.isEmpty()) return
+
+        packagesToProtect
+            .filter { it != context.packageName }
+            .forEach { packageName ->
+                runCatching { dpm.setUninstallBlocked(admin, packageName, true) }
+            }
+        prefs.edit().putStringSet(LEGACY_PROTECTED_UNINSTALL_PACKAGES, packagesToProtect).apply()
+    }
+
+    private fun clearProtectedUninstallPackages(
+        context: Context,
+        dpm: DevicePolicyManager,
+        admin: android.content.ComponentName
+    ) {
+        val protected = prefs.getStringSet(LEGACY_PROTECTED_UNINSTALL_PACKAGES, emptySet()).orEmpty()
+        val sealedPackages = VaultManager.blockedPackages(context)
+        protected
+            .filter { it !in sealedPackages && it != context.packageName }
+            .forEach { packageName ->
+                runCatching { dpm.setUninstallBlocked(admin, packageName, false) }
+            }
+        prefs.edit().remove(LEGACY_PROTECTED_UNINSTALL_PACKAGES).apply()
     }
 
     fun enforceNewlyInstalledPackagesIfNeeded(context: Context) {
