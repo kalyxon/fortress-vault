@@ -21,6 +21,7 @@ output-metadata.json
 # Signing and private configuration
 *.jks
 *.keystore
+*.keystore.b64
 keystore.properties
 
 # OS files

@@ -90,9 +90,13 @@ After Device Owner status is confirmed:
 
 Sealed applications may be hidden or suspended and the Sentinel foreground service will enforce the configured state. Android may show a persistent notification for this service.
 
-## Install A Release APK
+## Easy WebADB Setup (For Regular Users)
 
-Build the unsigned release APK with:
+If you do not want to install command-line ADB or Android Studio on your PC, follow our beginner-friendly **[User Guide (`USER_GUIDE.md`)](USER_GUIDE.md)** which uses **[WebADB.com](https://webadb.com)** directly inside your web browser (Chrome/Edge/Brave).
+
+## Building & Installing A Release APK
+
+Build the signed release APK with:
 
 ```bash
 ./gradlew assembleRelease
@@ -101,10 +105,11 @@ Build the unsigned release APK with:
 The output is written to:
 
 ```text
-app/build/outputs/apk/release/app-release-unsigned.apk
+app/build/outputs/apk/release/app-release.apk
 ```
 
-The release build is not configured with a signing key. To distribute it beyond local testing, configure a private signing key in the Android Gradle configuration and keep credentials outside source control. For a local device test, the debug APK is the simplest option.
+### GitHub Releases & Automated Build
+This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`). When you tag a release (e.g. `git tag v1.2.0 && git push origin v1.2.0`), GitHub Actions will automatically build the release APK and attach `FortressVault-v1.2.0.apk` directly to the GitHub Release page for users to download.
 
 ## Troubleshooting
 

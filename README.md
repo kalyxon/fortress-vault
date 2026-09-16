@@ -74,21 +74,49 @@ The debug APK is created at
 `app/build/outputs/apk/debug/app-debug.apk`. On Windows, use
 `gradlew.bat assembleDebug`.
 
-## Install on a test device
+## Quick Install Guide (For Non-Developers / Easy WebADB)
 
-Device Owner provisioning requires a fresh device. It normally fails if the
-phone already has an account, an existing device owner, or restored setup
-data. Factory reset erases the device, so back up anything important first.
+If you are a user looking to install Fortress Vault without installing Android Studio or ADB command-line tools on your PC:
 
-1. Factory reset the phone and complete setup without adding an account or
-  restoring a backup.
+👉 **[Read the Easy Step-by-Step WebADB User Guide (`USER_GUIDE.md`)](USER_GUIDE.md)**
+
+It guides you through:
+1. Backing up and factory resetting your phone.
+2. Installing the pre-built Release APK from **GitHub Releases**.
+3. Connecting your phone to your browser via **[WebADB.com](https://webadb.com)** (no PC software download required!).
+4. Running the 1-line setup command: `dpm set-device-owner com.fortress.vault/.FortressAdminReceiver`
+
+---
+
+## Developer Requirements & Build
+
+- Android Studio Koala or newer
+- JDK 17
+- Android SDK Platform 34 and compatible Build-Tools
+- A physical Android device running Android 8.0 (API 26) or newer
+
+### Building Release APK
+
+To build a release APK locally:
+
+```bash
+./gradlew assembleRelease
+```
+
+The signed release APK will be generated at:
+`app/build/outputs/apk/release/app-release.apk`
+
+Automated releases are built via **GitHub Actions** (`.github/workflows/release.yml`) whenever a release tag (e.g. `v1.2.0`) is pushed to the repository.
+
+### Developer Manual Installation
+
+1. Factory reset the phone and complete setup without adding an account or restoring a backup.
 2. Enable Developer options and USB debugging.
-3. Connect the phone and confirm that `adb devices` reports the device as
-  `device`.
-4. Install the debug APK:
+3. Connect the phone via USB.
+4. Install the release APK:
 
   ```bash
-  adb install -r app/build/outputs/apk/debug/app-debug.apk
+  adb install -r app/build/outputs/apk/release/app-release.apk
   ```
 
 5. Assign Fortress Vault as Device Owner:
@@ -97,24 +125,13 @@ data. Factory reset erases the device, so back up anything important first.
   adb shell dpm set-device-owner com.fortress.vault/.FortressAdminReceiver
   ```
 
-6. Launch the app:
+6. Launch the app from launcher or via command:
 
   ```bash
   adb shell monkey -p com.fortress.vault 1
   ```
 
-Follow the in-app setup, choose the packages to block, set an unlock time,
-and store the recovery phrase somewhere secure and offline.
-
-Fortress also requires a secure phone lock. After Device Owner setup, if the
-phone does not have a PIN, password, or pattern, Fortress opens the Android
-security settings and keeps seals and device controls unavailable until one is
-configured.
-After a secure lock exists, Fortress requests device-credential verification
-before showing the vault and asks again when the app returns to the foreground.
-
-For a fuller installation walkthrough and troubleshooting notes, see
-[`INSTALLATION.md`](INSTALLATION.md).
+For a full troubleshooting guide, see [`INSTALLATION.md`](INSTALLATION.md) and [`USER_GUIDE.md`](USER_GUIDE.md).
 
 ## Project structure
 
@@ -178,6 +195,9 @@ app/src/main/java/com/fortress/vault/
 
 ## License
 
-The app code is provided for this project. The bundled Spectral font is
-licensed under the SIL Open Font License; its license text is in
-[`licenses/SPECTRAL-OFL.txt`](licenses/SPECTRAL-OFL.txt).
+This project is licensed under the **Fortress Vault Source-Available Non-Commercial & Anti-Patent License**. See [`LICENSE`](LICENSE) for the full license terms.
+
+- 🚫 **No Commercial Use**: Commercial sale, monetization, or inclusion in paid products is strictly prohibited.
+- 🔓 **Share-Alike**: All derivative works and modifications must remain public and open under the same license terms.
+- 🛡️ **Anti-Patent Protection**: Filing patents or claiming exclusive rights on these concepts, architecture, or code is prohibited.
+- 🎨 **Bundled Fonts**: The Spectral font is licensed under the SIL Open Font License ([`licenses/SPECTRAL-OFL.txt`](licenses/SPECTRAL-OFL.txt)).
