@@ -29,14 +29,29 @@ import com.fortress.vault.ui.theme.SteelSurfaceHigh
 import com.fortress.vault.ui.theme.TextPrimary
 import com.fortress.vault.ui.theme.TextSecondary
 import com.fortress.vault.ui.theme.VaultDivider
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var locks by remember { mutableStateOf(ControlManager.activeLocks(context)) }
+
+    // Load active locks on IO to avoid reading EncryptedSharedPreferences on the main thread
+    var locks by remember { mutableStateOf(emptyList<com.fortress.vault.core.ControlLock>()) }
+    var locksLoaded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        locks = withContext(Dispatchers.IO) { ControlManager.activeLocks(context) }
+        locksLoaded = true
+    }
+
+    suspend fun refreshLocks() {
+        locks = withContext(Dispatchers.IO) { ControlManager.activeLocks(context) }
+    }
+
     var selected by remember { mutableStateOf(emptySet<DeviceControl>()) }
     var fullAppChangeBlock by remember { mutableStateOf(false) }
     var days by remember { mutableStateOf(1) }
@@ -53,7 +68,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         else -> MAX_UPDATE_FRIENDLY_APP_CHANGE_DAYS
     }
 
-    fun refresh() { locks = ControlManager.activeLocks(context) }
+    fun refresh() { scope.launch { refreshLocks() } }
 
     val prepared = preparedControls
     if (step == 1 && prepared != null) {
@@ -306,7 +321,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         Text("Each control has its own timer and recovery phrase.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(16.dp))
         LazyColumn(Modifier.weight(1f)) {
-            items(DeviceControl.entries) { control ->
+            items(DeviceControl.entries, key = { it.key }) { control ->
                 val active = locks.firstOrNull { it.control == control }
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
@@ -324,15 +339,19 @@ fun SettingsScreen(onBack: () -> Unit) {
                         }
                     )
                     Column(Modifier.weight(1f)) {
-                        Text(control.title, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            if (active != null) {
-                                "Active for ${TimeUnit.MILLISECONDS.toHours(ControlManager.remainingMillis(context, active))}h"
-                            }
-                            else "Not active",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                                    Text(control.title, style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        if (active != null) {
+                                            // Memoize per lock — only recomputes when active lock object changes
+                                            val hoursLeft = remember(active) {
+                                                TimeUnit.MILLISECONDS.toHours(ControlManager.remainingMillis(context, active))
+                                            }
+                                            "Active for ${hoursLeft}h"
+                                        }
+                                        else "Not active",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                     if (active != null) {
                         TextButton(onClick = { unlockTarget = control; phrase = ""; error = null }) { Text("Unlock") }
                     }
