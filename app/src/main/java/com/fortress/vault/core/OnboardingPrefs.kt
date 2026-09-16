@@ -5,16 +5,13 @@ import android.content.Context
 object OnboardingPrefs {
     private const val PREFS_NAME = "fortress_onboarding_prefs"
     private const val KEY_ACCEPTED_TERMS = "accepted_terms"
+    private const val KEY_SETUP_COMPLETED = "setup_completed"
 
     // User-switching block preference:
     //   "unset"   → never answered (ask on next seal)
     //   "block"   → user chose to block user-switching
     //   "noblock" → user chose NOT to block user-switching (per-user freeze still applies)
     //   "saved"   → user said "don't ask again", default = noblock
-    // User-switching block preference:
-    //   "unset"   → never answered
-    //   "block"   → user chose to block user-switching
-    //   "noblock" → user chose NOT to block user-switching (per-user freeze still applies)
     private const val KEY_USER_SWITCH_PREF = "user_switch_block_pref"
     private const val VAL_UNSET = "unset"
     const val VAL_BLOCK = "block"
@@ -30,6 +27,17 @@ object OnboardingPrefs {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_ACCEPTED_TERMS, true)
+            .apply()
+    }
+
+    fun isSetupCompleted(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SETUP_COMPLETED, false)
+
+    fun setSetupCompleted(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SETUP_COMPLETED, true)
             .apply()
     }
 
