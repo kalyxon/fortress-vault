@@ -161,6 +161,7 @@ fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
                 } catch (_: Exception) {
                 }
 
+                com.fortress.vault.core.OnboardingPrefs.setSetupCompleted(context)
                 onDeviceOwnerConfirmed()
             },
             colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary),

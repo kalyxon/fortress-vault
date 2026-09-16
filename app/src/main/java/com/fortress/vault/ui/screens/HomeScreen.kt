@@ -35,6 +35,8 @@ import com.fortress.vault.ui.theme.CountdownStyle
 import com.fortress.vault.ui.theme.EmberRed
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -53,10 +55,16 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
     var pendingExtension by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var sealActionError by remember { mutableStateOf<String?>(null) }
 
+    // Single shared tick — refreshes seal list and countdown labels every 30s.
+    // All SealCards share this tick instead of each running their own LaunchedEffect loop.
+    var tick by remember { mutableStateOf(0L) }
     LaunchedEffect(Unit) {
         while (true) {
-            seals = VaultManager.activeSeals(context)
             delay(30_000)
+            // Reload seals in background — activeSeals() reads from in-memory cache, no disk I/O
+            val fresh = withContext(Dispatchers.IO) { VaultManager.activeSeals(context) }
+            seals = fresh
+            tick = System.currentTimeMillis()
         }
     }
 
@@ -101,6 +109,7 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
                 items(seals, key = { it.id }) { seal ->
                     SealCard(
                         seal = seal,
+                        tick = tick,
                         onTap = { detailsSealId = seal.id },
                         onExtend = { extendTargetSealId = seal.id },
                         onEmergencyUnlock = { onEmergencyUnlock(seal.id) }
@@ -208,15 +217,12 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
 }
 
 @Composable
-private fun SealCard(seal: Seal, onTap: () -> Unit, onExtend: () -> Unit, onEmergencyUnlock: () -> Unit) {
+private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> Unit, onEmergencyUnlock: () -> Unit) {
     val context = LocalContext.current
-    var remainingLabel by remember(seal.id) { mutableStateOf(VaultManager.remainingLabelFor(context, seal)) }
-
-    LaunchedEffect(seal.id) {
-        while (true) {
-            remainingLabel = VaultManager.remainingLabelFor(context, seal)
-            delay(30_000)
-        }
+    // Recompute label when tick changes — driven by single shared 30s loop in HomeScreen,
+    // not per-card. This eliminates N parallel LaunchedEffect loops for N seal cards.
+    val remainingLabel = remember(seal.id, tick) {
+        VaultManager.remainingLabelFor(context, seal)
     }
 
     Card(
@@ -276,14 +282,18 @@ private fun SealDetailDialog(
     onAddApps: () -> Unit
 ) {
     val uniquePackages = remember(seal) { seal.packages.toList().distinct() }
-    val apps = remember(uniquePackages) {
-        uniquePackages.map { packageName ->
-            val label = runCatching {
-                val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
-                context.packageManager.getApplicationLabel(appInfo).toString()
-            }.getOrDefault(packageName)
-            PackageEntry(packageName, label)
-        }.sortedBy { it.label.lowercase() }
+
+    // Load labels asynchronously on IO to avoid blocking composition thread
+    val apps by produceState<List<PackageEntry>>(initialValue = emptyList(), uniquePackages) {
+        value = withContext(Dispatchers.IO) {
+            uniquePackages.map { packageName ->
+                val label = runCatching {
+                    val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
+                    context.packageManager.getApplicationLabel(appInfo).toString()
+                }.getOrDefault(packageName)
+                PackageEntry(packageName, label)
+            }.sortedBy { it.label.lowercase() }
+        }
     }
 
     AlertDialog(
@@ -298,30 +308,39 @@ private fun SealDetailDialog(
                 )
 
                 Spacer(Modifier.height(12.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                    items(apps) { app ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val icon = remember(app.packageName) {
-                                runCatching { context.packageManager.getApplicationIcon(app.packageName).toBitmap().asImageBitmap() }.getOrNull()
-                            }
-                            if (icon != null) {
-                                Image(
-                                    bitmap = icon,
-                                    contentDescription = app.label,
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                )
-                                Spacer(Modifier.width(10.dp))
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(app.label, style = MaterialTheme.typography.bodyLarge)
-                                Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (apps.isEmpty()) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.CenterHorizontally).size(24.dp),
+                        color = BrassPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
+                        items(apps, key = { it.packageName }) { app ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val icon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, app.packageName) {
+                                    value = com.fortress.vault.core.IconCache.getIconAsync(context, app.packageName)
+                                }
+                                val currentIcon = icon
+                                if (currentIcon != null) {
+                                    Image(
+                                        bitmap = currentIcon,
+                                        contentDescription = app.label,
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(app.label, style = MaterialTheme.typography.bodyLarge)
+                                    Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
                     }
@@ -345,11 +364,13 @@ private fun AddAppsToSealDialog(
     onDismiss: () -> Unit,
     onConfirm: (Set<String>) -> Unit
 ) {
-    val allApps = remember(sealId) { loadLaunchableApps(context) }
+    val allApps by produceState<List<InstalledApp>>(initialValue = emptyList(), sealId) {
+        value = withContext(Dispatchers.IO) { loadLaunchableApps(context) }
+    }
     val existingPackages = remember(sealId, seals) {
         seals.firstOrNull { it.id == sealId }?.packages.orEmpty()
     }
-    val candidates = remember(sealId) { allApps.filter { it.packageName !in existingPackages } }
+    val candidates = remember(allApps, existingPackages) { allApps.filter { it.packageName !in existingPackages } }
     val selected = remember { mutableStateOf(setOf<String>()) }
 
     AlertDialog(
@@ -363,11 +384,17 @@ private fun AddAppsToSealDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(12.dp))
-                if (candidates.isEmpty()) {
+                if (allApps.isEmpty()) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.CenterHorizontally).size(24.dp),
+                        color = BrassPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else if (candidates.isEmpty()) {
                     Text("No more apps are available to add to this seal.", style = MaterialTheme.typography.bodyMedium)
                 } else {
                     LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
-                        items(candidates) { app ->
+                        items(candidates, key = { it.packageName }) { app ->
                             val checked = selected.value.contains(app.packageName)
                             Row(
                                 modifier = Modifier
@@ -411,13 +438,18 @@ private fun AddAppsConfirmationDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    val labels = packageNames.map { packageName ->
-        runCatching {
-            context.packageManager.getApplicationLabel(
-                context.packageManager.getApplicationInfo(packageName, 0)
-            ).toString()
-        }.getOrDefault(packageName)
-    }.sorted()
+    // Load labels asynchronously — previously done synchronously on composition thread
+    val labels by produceState<List<String>>(initialValue = emptyList(), packageNames) {
+        value = withContext(Dispatchers.IO) {
+            packageNames.map { packageName ->
+                runCatching {
+                    context.packageManager.getApplicationLabel(
+                        context.packageManager.getApplicationInfo(packageName, 0)
+                    ).toString()
+                }.getOrDefault(packageName)
+            }.sorted()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -426,9 +458,17 @@ private fun AddAppsConfirmationDialog(
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text("These apps will be added to the existing seal and blocked until the current unlock date:")
                 Spacer(Modifier.height(12.dp))
-                labels.forEach { label ->
-                    Text("- $label", style = MaterialTheme.typography.bodyLarge)
-                    Spacer(Modifier.height(4.dp))
+                if (labels.isEmpty()) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.CenterHorizontally).size(20.dp),
+                        color = BrassPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    labels.forEach { label ->
+                        Text("- $label", style = MaterialTheme.typography.bodyLarge)
+                        Spacer(Modifier.height(4.dp))
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -439,7 +479,10 @@ private fun AddAppsConfirmationDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Confirm and add", color = BrassPrimary) }
+            TextButton(
+                enabled = labels.isNotEmpty(),
+                onClick = onConfirm
+            ) { Text("Confirm and add", color = BrassPrimary) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Back") }
@@ -449,15 +492,15 @@ private fun AddAppsConfirmationDialog(
 
 @Composable
 private fun AppIconRow(context: android.content.Context, packages: Set<String>) {
-    val uniquePackages = packages.toList().distinct()
+    val uniquePackages = remember(packages) { packages.toList().distinct() }
     Row {
         uniquePackages.take(8).forEach { pkg ->
-            val icon = remember(pkg) {
-                runCatching { context.packageManager.getApplicationIcon(pkg).toBitmap().asImageBitmap() }.getOrNull()
+            val icon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, pkg) {
+                value = com.fortress.vault.core.IconCache.getIconAsync(context, pkg)
             }
             if (icon != null) {
                 Image(
-                    bitmap = icon,
+                    bitmap = icon!!,
                     contentDescription = pkg,
                     modifier = Modifier
                         .padding(end = 8.dp)

@@ -12,6 +12,7 @@ import com.fortress.vault.core.VaultManager
 import com.fortress.vault.core.SentinelController
 import com.fortress.vault.core.ControlManager
 import com.fortress.vault.service.PackageChangeReinforceWorker
+import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
 class FortressApplication : Application(), Configuration.Provider {
@@ -19,26 +20,31 @@ class FortressApplication : Application(), Configuration.Provider {
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setExecutor(Executors.newSingleThreadExecutor())
-            .setMaxSchedulerLimit(1)
             .build()
 
     override fun onCreate() {
         super.onCreate()
 
-        // VaultManager is our single source of truth for sealed/unsealed state.
-        // Everything else (freezer, sentinel, boot receiver, UI) reads from it.
-        VaultManager.init(this)
-        ControlManager.apply(this)
-        val persistedSeals = PersistentVaultStore.read(this)
-        val seals = persistedSeals ?: VaultManager.activeSeals(this)
-        VaultManager.enforceDeviceOwnerRestrictions(this)
-        if (seals.isNotEmpty() || ControlManager.activeLocks(this).isNotEmpty()) {
-            PackageFreezer.freezeAll(this, seals.flatMap { it.packages }.toSet())
-            runCatching { SentinelController.start(this) }
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()).launch {
+            VaultManager.init(this@FortressApplication)
+            ControlManager.apply(this@FortressApplication)
+            val persistedSeals = PersistentVaultStore.read(this@FortressApplication)
+            val seals = persistedSeals ?: VaultManager.activeSeals(this@FortressApplication)
+            VaultManager.enforceDeviceOwnerRestrictions(this@FortressApplication)
+            if (seals.isNotEmpty() || ControlManager.activeLocks(this@FortressApplication).isNotEmpty()) {
+                PackageFreezer.freezeAll(this@FortressApplication, seals.flatMap { it.packages }.toSet())
+                runCatching { SentinelController.start(this@FortressApplication) }
+            }
         }
-        WorkManager.getInstance(this).apply {
-            cancelAllWorkByTag(PackageChangeReinforceWorker::class.java.name)
-            pruneWork()
+        
+        runCatching {
+            WorkManager.initialize(this, workManagerConfiguration)
+        }
+        runCatching {
+            WorkManager.getInstance(this).apply {
+                cancelAllWorkByTag(PackageChangeReinforceWorker::class.java.name)
+                pruneWork()
+            }
         }
 
         createNotificationChannel()

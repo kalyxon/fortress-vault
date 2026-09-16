@@ -16,20 +16,28 @@ object SentinelController {
 
     fun start(context: Context) {
         val serviceIntent = Intent(context, SentinelService::class.java)
-        ContextCompat.startForegroundService(context, serviceIntent)
+        runCatching {
+            ContextCompat.startForegroundService(context, serviceIntent)
+        }
 
-        val request = PeriodicWorkRequestBuilder<SentinelWorker>(15, TimeUnit.MINUTES)
-            .build()
+        runCatching {
+            val request = PeriodicWorkRequestBuilder<SentinelWorker>(15, TimeUnit.MINUTES)
+                .build()
 
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
-            request
-        )
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                request
+            )
+        }
     }
 
     fun stop(context: Context) {
-        context.stopService(Intent(context, SentinelService::class.java))
-        WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        runCatching {
+            context.stopService(Intent(context, SentinelService::class.java))
+        }
+        runCatching {
+            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        }
     }
 }

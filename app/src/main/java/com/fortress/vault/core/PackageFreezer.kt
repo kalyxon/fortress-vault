@@ -35,7 +35,7 @@ object PackageFreezer {
             retryOnFailure = false,
             userContexts = allUserContexts(context),
             protectUninstall = false,
-            hidePackage = false
+            hidePackage = true
         )
     }
 
@@ -75,6 +75,11 @@ object PackageFreezer {
         protectUninstall: Boolean = true,
         hidePackage: Boolean = true
     ): Boolean {
+        if (packageName == context.packageName) {
+            Log.w(TAG, "Cannot freeze self package $packageName")
+            return true
+        }
+
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val admin = FortressAdminReceiver.getComponentName(context)
 
@@ -211,12 +216,17 @@ object PackageFreezer {
             val permissions = packageInfo.requestedPermissions ?: return
             for (permission in permissions) {
                 try {
-                    dpm.setPermissionGrantState(
-                        admin,
-                        packageName,
-                        permission,
-                        DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED
-                    )
+                    val currentState = runCatching {
+                        dpm.getPermissionGrantState(admin, packageName, permission)
+                    }.getOrDefault(-1)
+                    if (currentState != DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED) {
+                        dpm.setPermissionGrantState(
+                            admin,
+                            packageName,
+                            permission,
+                            DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED
+                        )
+                    }
                 } catch (e: Exception) {
                 }
             }
@@ -248,10 +258,10 @@ object PackageFreezer {
         if (!VaultManager.isSealed(context)) return
 
         val blocked = VaultManager.blockedPackages(context)
-        if (blocked.isEmpty()) return
+        if (packageName !in blocked) return
 
-        Log.i(TAG, "Package $packageName reinstalled/updated while sealed; reapplying freeze to ${blocked.size} blocked package(s)")
-        freezeAll(context, blocked)
+        Log.i(TAG, "Package $packageName reinstalled/updated while sealed; reapplying freeze to package")
+        freezeOne(context, packageName, retryOnFailure = true)
     }
 
     // ── User enumeration ────────────────────────────────────────────────────

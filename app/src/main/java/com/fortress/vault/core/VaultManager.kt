@@ -33,22 +33,42 @@ object VaultManager {
 
     private lateinit var prefs: android.content.SharedPreferences
     private var initialized = false
+    private var cachedSeals: List<Seal>? = null
     private val lock = Any()
 
     fun init(context: Context) {
         synchronized(lock) {
             if (initialized) return
-            val masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
+            try {
+                val masterKey = MasterKey.Builder(context)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
 
-            prefs = EncryptedSharedPreferences.create(
-                context,
-                PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
+                prefs = EncryptedSharedPreferences.create(
+                    context,
+                    PREFS_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            } catch (e: Exception) {
+                Log.e("VaultManager", "Failed to init EncryptedSharedPreferences, resetting", e)
+                context.deleteSharedPreferences(PREFS_NAME)
+                runCatching {
+                    val masterKey = MasterKey.Builder(context)
+                        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                        .build()
+                    prefs = EncryptedSharedPreferences.create(
+                        context,
+                        PREFS_NAME,
+                        masterKey,
+                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    )
+                }.getOrElse {
+                    prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                }
+            }
             initialized = true
             reconcileWithPersistentStore(context)
         }
@@ -56,7 +76,10 @@ object VaultManager {
 
     fun activeSeals(context: Context): List<Seal> = synchronized(lock) {
         init(context)
-        SealCodec.decodeList(prefs.getString(KEY_SEALS_JSON, null))
+        cachedSeals?.let { return it }
+        val seals = SealCodec.decodeList(prefs.getString(KEY_SEALS_JSON, null))
+        cachedSeals = seals
+        seals
     }
 
     fun isSealed(context: Context): Boolean = activeSeals(context).isNotEmpty()
@@ -336,6 +359,7 @@ object VaultManager {
 
     private fun saveSeals(context: Context, seals: List<Seal>) {
         synchronized(lock) {
+            cachedSeals = seals
             prefs.edit().putString(KEY_SEALS_JSON, SealCodec.encodeList(seals)).apply()
             PersistentVaultStore.write(context, seals)
             updateDeviceOwnerRestrictions(context)

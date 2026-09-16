@@ -33,7 +33,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,9 +56,28 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
     var isSealing by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    val installedApps = remember { loadLaunchableApps(context) }
-    val sealByPackage = remember {
-        VaultManager.activeSeals(context).flatMap { seal -> seal.packages.map { it to seal } }.toMap()
+    var installedApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
+    var isLoadingApps by remember { mutableStateOf(true) }
+
+    // sealByPackage and hasSecureLock are computed on IO to avoid main-thread IPC/KeyguardManager calls
+    var sealByPackage by remember { mutableStateOf<Map<String, com.fortress.vault.core.Seal>>(emptyMap()) }
+    var hasSecureLock by remember { mutableStateOf(true) } // optimistic default until IO confirms
+
+    LaunchedEffect(Unit) {
+        // Load apps, sealed package map, and secure lock check all on IO
+        val apps = withContext(kotlinx.coroutines.Dispatchers.IO) { loadLaunchableApps(context) }
+        val sealMap = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            VaultManager.activeSeals(context).flatMap { seal -> seal.packages.map { it to seal } }.toMap()
+        }
+        val secureLock = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.fortress.vault.core.DeviceSecurity.hasSecureLock(context)
+        }
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            installedApps = apps
+            sealByPackage = sealMap
+            hasSecureLock = secureLock
+            isLoadingApps = false
+        }
     }
 
     Column(
@@ -65,6 +86,36 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
             .background(MaterialTheme.colorScheme.background)
             .padding(24.dp)
     ) {
+        if (!hasSecureLock) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "Phone Lock Required to Create Seal",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Please set a PIN, pattern, or password in phone settings before creating a seal so your protection stays secure.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Set Phone Lock Now", color = MaterialTheme.colorScheme.onError)
+                    }
+                }
+            }
+        }
+
         when (step) {
             SealStep.SELECT_APPS -> {
                 Text("Choose What To Seal", style = MaterialTheme.typography.headlineMedium)
@@ -75,25 +126,34 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(16.dp))
-                LazyColumn(modifier = Modifier.weight(1f)) {
-                    items(installedApps) { app ->
-                        val lockedBySeal = sealByPackage[app.packageName]
-                        AppRow(
-                            app = app,
-                            checked = app.packageName in selectedPackages,
-                            lockedRemainingLabel = lockedBySeal?.let { VaultManager.remainingLabelFor(context, it) },
-                            onToggle = { checked ->
-                                selectedPackages = if (checked) {
-                                    if (selectedPackages.size < MAX_APPS_PER_SEAL) {
-                                        selectedPackages + app.packageName
-                                    } else {
-                                        selectedPackages
-                                    }
-                                } else {
-                                    selectedPackages - app.packageName
-                                }
+                if (isLoadingApps) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = BrassPrimary)
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        items(installedApps, key = { it.packageName }) { app ->
+                            val lockedBySeal = sealByPackage[app.packageName]
+                            val remainingLabel = remember(lockedBySeal) {
+                                lockedBySeal?.let { VaultManager.remainingLabelFor(context, it) }
                             }
-                        )
+                            AppRow(
+                                app = app,
+                                checked = app.packageName in selectedPackages,
+                                lockedRemainingLabel = remainingLabel,
+                                onToggle = { checked ->
+                                    selectedPackages = if (checked) {
+                                        if (selectedPackages.size < MAX_APPS_PER_SEAL) {
+                                            selectedPackages + app.packageName
+                                        } else {
+                                            selectedPackages
+                                        }
+                                    } else {
+                                        selectedPackages - app.packageName
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.height(16.dp))
@@ -436,10 +496,8 @@ private fun AppRow(
     onToggle: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    val iconBitmap = remember(app.packageName) {
-        runCatching {
-            context.packageManager.getApplicationIcon(app.packageName).toBitmap().asImageBitmap()
-        }.getOrNull()
+    val iconBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, app.packageName) {
+        value = com.fortress.vault.core.IconCache.getIconAsync(context, app.packageName)
     }
     val isLocked = lockedRemainingLabel != null
 
@@ -455,9 +513,10 @@ private fun AppRow(
             Checkbox(checked = checked, onCheckedChange = onToggle, colors = CheckboxDefaults.colors(checkedColor = BrassPrimary))
         }
 
-        if (iconBitmap != null) {
+        val currentIcon = iconBitmap
+        if (currentIcon != null) {
             Image(
-                bitmap = iconBitmap,
+                bitmap = currentIcon,
                 contentDescription = app.label,
                 modifier = Modifier
                     .size(40.dp)
@@ -496,17 +555,43 @@ private fun AppRow(
     }
 }
 
-fun loadLaunchableApps(context: android.content.Context): List<InstalledApp> {
-    val pm = context.packageManager
-    val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
-    return pm.queryIntentActivities(intent, 0)
-        .map { resolveInfo ->
-            InstalledApp(
-                label = resolveInfo.loadLabel(pm).toString(),
-                packageName = resolveInfo.activityInfo.packageName
-            )
+object AppRepository {
+    @Volatile private var cachedApps: List<InstalledApp>? = null
+    private val lock = Any()
+
+    fun getLaunchableApps(context: android.content.Context): List<InstalledApp> {
+        cachedApps?.let { return it }
+        synchronized(lock) {
+            cachedApps?.let { return it }
+            val pm = context.packageManager
+            val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
+            val list = pm.queryIntentActivities(intent, 0)
+                .map { resolveInfo ->
+                    val label = resolveInfo.nonLocalizedLabel?.toString()
+                        ?: runCatching { resolveInfo.loadLabel(pm).toString() }.getOrDefault(resolveInfo.activityInfo.packageName)
+                    InstalledApp(
+                        label = label,
+                        packageName = resolveInfo.activityInfo.packageName
+                    )
+                }
+                .filter { it.packageName != context.packageName }
+                .distinctBy { it.packageName }
+                .sortedBy { it.label.lowercase() }
+
+            val topPackages = list.take(30).map { it.packageName }
+            com.fortress.vault.core.IconCache.preloadIcons(context, topPackages)
+
+            cachedApps = list
+            return list
         }
-        .filter { it.packageName != context.packageName }
-        .distinctBy { it.packageName }
-        .sortedBy { it.label.lowercase() }
+    }
+
+    fun invalidateCache() {
+        synchronized(lock) {
+            cachedApps = null
+        }
+    }
 }
+
+fun loadLaunchableApps(context: android.content.Context): List<InstalledApp> =
+    AppRepository.getLaunchableApps(context)

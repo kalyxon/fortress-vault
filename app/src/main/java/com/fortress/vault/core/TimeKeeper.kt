@@ -16,6 +16,9 @@ object TimeKeeper {
     private const val KEY_LAST_SYNC_REAL_MILLIS = "last_sync_real_millis"
     private const val KEY_LAST_SYNC_ELAPSED_REALTIME = "last_sync_elapsed_realtime"
 
+    @Volatile private var cachedLastReal: Long = -1L
+    @Volatile private var cachedLastElapsed: Long = -1L
+
     suspend fun fetchTrustedTimeMillis(context: Context): Long = withContext(Dispatchers.IO) {
         try {
             val networkTime = fetchFromHttpHeader()
@@ -27,9 +30,16 @@ object TimeKeeper {
     }
 
     fun estimateCurrentTrustedTimeMillis(context: Context): Long {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val lastReal = prefs.getLong(KEY_LAST_SYNC_REAL_MILLIS, -1L)
-        val lastElapsed = prefs.getLong(KEY_LAST_SYNC_ELAPSED_REALTIME, -1L)
+        var lastReal = cachedLastReal
+        var lastElapsed = cachedLastElapsed
+
+        if (lastReal == -1L) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            lastReal = prefs.getLong(KEY_LAST_SYNC_REAL_MILLIS, -1L)
+            lastElapsed = prefs.getLong(KEY_LAST_SYNC_ELAPSED_REALTIME, -1L)
+            cachedLastReal = lastReal
+            cachedLastElapsed = lastElapsed
+        }
 
         if (lastReal == -1L) {
             return System.currentTimeMillis()
@@ -58,10 +68,13 @@ object TimeKeeper {
     }
 
     private fun persistSyncPoint(context: Context, networkTimeMillis: Long) {
+        val elapsedNow = android.os.SystemClock.elapsedRealtime()
+        cachedLastReal = networkTimeMillis
+        cachedLastElapsed = elapsedNow
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit()
             .putLong(KEY_LAST_SYNC_REAL_MILLIS, networkTimeMillis)
-            .putLong(KEY_LAST_SYNC_ELAPSED_REALTIME, android.os.SystemClock.elapsedRealtime())
+            .putLong(KEY_LAST_SYNC_ELAPSED_REALTIME, elapsedNow)
             .apply()
     }
 }
