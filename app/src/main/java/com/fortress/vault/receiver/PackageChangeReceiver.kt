@@ -18,7 +18,7 @@ import com.fortress.vault.service.PackageChangeReinforceWorker
 class PackageChangeReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == ACTION_UNINSTALL_RESULT) return
+        com.fortress.vault.ui.screens.AppRepository.invalidateCache()
         val packageName = intent.data?.schemeSpecificPart ?: return
         val isNewInstall = intent.action == Intent.ACTION_PACKAGE_ADDED &&
             !intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
@@ -62,11 +62,13 @@ class PackageChangeReceiver : BroadcastReceiver() {
             )
             .setInputData(Data.Builder().putString(PackageChangeReinforceWorker.KEY_PACKAGE, packageName).build())
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "$REINFORCE_WORK_NAME:$packageName",
-            ExistingWorkPolicy.REPLACE,
-            workRequest
-        )
+        runCatching {
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "$REINFORCE_WORK_NAME:$packageName",
+                ExistingWorkPolicy.REPLACE,
+                workRequest
+            )
+        }
     }
 
     companion object {

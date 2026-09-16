@@ -26,8 +26,7 @@ class BootReceiver : BroadcastReceiver() {
         VaultManager.enforceDeviceOwnerRestrictions(context)
         PackageFreezer.freezeAll(context, seals.flatMap { it.packages }.toSet())
 
-        val serviceIntent = Intent(context, SentinelService::class.java)
-        ContextCompat.startForegroundService(context, serviceIntent)
+        com.fortress.vault.core.SentinelController.start(context)
 
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.Default).launch {
