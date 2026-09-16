@@ -3,6 +3,7 @@ package com.fortress.vault.core
 import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.os.UserManager
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.fortress.vault.FortressAdminReceiver
@@ -40,23 +41,53 @@ object ControlManager {
     private const val LEGACY_PROTECTED_UNINSTALL_PACKAGES = "protected_uninstall_packages"
     private val lock = Any()
     private lateinit var prefs: android.content.SharedPreferences
+    private var cachedLocks: List<ControlLock>? = null
+
+    // Tracks the last state that was actually applied to DevicePolicyManager.
+    // apply() compares against this and skips IPC calls when nothing changed.
+    private data class AppliedState(
+        val usbDebugging: Boolean,
+        val userAccounts: Boolean,
+        val fullAppChangeBlock: Boolean,
+        val isBlockingAppChanges: Boolean
+    )
+    @Volatile private var lastAppliedState: AppliedState? = null
 
     fun init(context: Context) {
         synchronized(lock) {
             if (::prefs.isInitialized) return
-            val key = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-            prefs = EncryptedSharedPreferences.create(
-                context, PREFS_NAME, key,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
+            try {
+                val key = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+                prefs = EncryptedSharedPreferences.create(
+                    context, PREFS_NAME, key,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            } catch (e: Exception) {
+                Log.e("ControlManager", "Failed to init EncryptedSharedPreferences, resetting", e)
+                context.deleteSharedPreferences(PREFS_NAME)
+                runCatching {
+                    val key = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+                    prefs = EncryptedSharedPreferences.create(
+                        context, PREFS_NAME, key,
+                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    )
+                }.getOrElse {
+                    prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                }
+            }
         }
     }
 
     fun activeLocks(context: Context): List<ControlLock> = synchronized(lock) {
         init(context)
-        val json = prefs.getString(LOCKS_JSON, null) ?: return emptyList()
-        runCatching {
+        cachedLocks?.let { return it }
+        val json = prefs.getString(LOCKS_JSON, null) ?: run {
+            cachedLocks = emptyList()
+            return emptyList()
+        }
+        val list = runCatching {
             val root = JSONObject(json)
             DeviceControl.entries.mapNotNull { control ->
                 val item = root.optJSONObject(control.key) ?: return@mapNotNull null
@@ -69,6 +100,8 @@ object ControlManager {
                 )
             }
         }.getOrDefault(emptyList())
+        cachedLocks = list
+        list
     }
 
     suspend fun prepare(
@@ -157,10 +190,26 @@ object ControlManager {
         val appChangeLock = active.firstOrNull { it.control == DeviceControl.APP_INSTALLS }
         val isBlockingAppChanges = appChangeLock != null
         val fullAppChangeBlock = appChangeLock?.fullAppChangeBlock == true
+        val controls = active.map { it.control }.toSet()
+        val wantsUsbDebugBlock = DeviceControl.USB_DEBUGGING in controls
+        val wantsUserAccountsBlock = DeviceControl.USER_ACCOUNTS in controls
+
+        // Compute the desired state and compare with last applied state.
+        // If nothing changed, skip all IPC calls entirely.
+        val desiredState = AppliedState(wantsUsbDebugBlock, wantsUserAccountsBlock, fullAppChangeBlock, isBlockingAppChanges)
+        val prev = lastAppliedState
+        val stateChanged = prev != desiredState
+        val expiredLocks = active.size != allLocks.size
+
+        if (!stateChanged && !expiredLocks) {
+            // No DPM state change needed — skip all IPC calls
+            return
+        }
+
         if (!isBlockingAppChanges) {
             clearProtectedUninstallPackages(context, dpm, admin)
         }
-        if (active.size != allLocks.size) {
+        if (expiredLocks) {
             synchronized(lock) { save(active) }
         }
         if (wasBlockingAppChanges && !isBlockingAppChanges) {
@@ -179,18 +228,15 @@ object ControlManager {
             }.getOrDefault(emptySet())
             prefs.edit().putStringSet(INSTALL_BASELINE_PACKAGES, installed).apply()
         }
-        if (isBlockingAppChanges && !fullAppChangeBlock) {
-            enforceNewlyInstalledPackagesIfNeeded(context)
-        }
-        val controls = active.map { it.control }.toSet()
-        setRestriction(dpm, admin, UserManager.DISALLOW_DEBUGGING_FEATURES, DeviceControl.USB_DEBUGGING in controls)
-        setRestriction(dpm, admin, UserManager.DISALLOW_ADD_USER, DeviceControl.USER_ACCOUNTS in controls)
-        setRestriction(dpm, admin, UserManager.DISALLOW_USER_SWITCH, DeviceControl.USER_ACCOUNTS in controls)
+        setRestriction(dpm, admin, UserManager.DISALLOW_DEBUGGING_FEATURES, wantsUsbDebugBlock)
+        setRestriction(dpm, admin, UserManager.DISALLOW_ADD_USER, wantsUserAccountsBlock)
+        setRestriction(dpm, admin, UserManager.DISALLOW_USER_SWITCH, wantsUserAccountsBlock)
         setRestriction(dpm, admin, UserManager.DISALLOW_INSTALL_APPS, fullAppChangeBlock)
         setRestriction(dpm, admin, UserManager.DISALLOW_UNINSTALL_APPS, fullAppChangeBlock)
         if (isBlockingAppChanges && !fullAppChangeBlock) {
             protectBaselinePackages(context, dpm, admin)
         }
+        lastAppliedState = desiredState
     }
 
     private fun protectBaselinePackages(
@@ -243,6 +289,7 @@ object ControlManager {
 
         newPackages.forEach { packageName ->
             PackageFreezer.quarantineNewPackage(context, packageName)
+            rememberNewlyBlockedPackage(context, packageName)
             PackageFreezer.uninstallNewPackage(context, packageName)
         }
     }
@@ -252,6 +299,9 @@ object ControlManager {
     }
 
     private fun save(locks: List<ControlLock>) {
+        cachedLocks = locks
+        // Invalidate applied state so the next apply() call re-pushes DPM state
+        lastAppliedState = null
         val root = JSONObject()
         locks.forEach { item ->
             root.put(item.control.key, JSONObject().apply {
