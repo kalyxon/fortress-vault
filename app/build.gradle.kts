@@ -26,21 +26,21 @@ android {
                 propsFile.inputStream().use { props.load(it) }
             }
 
-            val rawPath = System.getenv("KEYSTORE_FILE")
-                ?: props.getProperty("KEYSTORE_FILE")
+            val rawPath = System.getenv("KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
+                ?: props.getProperty("KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
                 ?: "fortress_vault_release.keystore"
             val resolvedFile = sequenceOf(
                 file(rawPath),
                 rootProject.file(rawPath),
                 rootProject.file(File(rawPath).name),
                 rootProject.file("fortress_vault_release.keystore")
-            ).firstOrNull { it.exists() }
+            ).firstOrNull { it.exists() && it.isFile }
 
-            val pass = System.getenv("KEYSTORE_PASSWORD") ?: props.getProperty("KEYSTORE_PASSWORD")
-            val alias = System.getenv("KEY_ALIAS") ?: props.getProperty("KEY_ALIAS")
-            val keyPass = System.getenv("KEY_PASSWORD") ?: props.getProperty("KEY_PASSWORD")
+            val pass = System.getenv("KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() } ?: props.getProperty("KEYSTORE_PASSWORD")
+            val alias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: props.getProperty("KEY_ALIAS")
+            val keyPass = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: props.getProperty("KEY_PASSWORD")
 
-            if (resolvedFile != null && !pass.isNullOrEmpty() && !alias.isNullOrEmpty() && !keyPass.isNullOrEmpty()) {
+            if (resolvedFile != null && resolvedFile.isFile && !pass.isNullOrEmpty() && !alias.isNullOrEmpty() && !keyPass.isNullOrEmpty()) {
                 storeFile = resolvedFile
                 storePassword = pass
                 keyAlias = alias
