@@ -3,6 +3,7 @@ package com.fortress.vault.receiver
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.util.Log
 import androidx.work.ExistingWorkPolicy
 import androidx.work.Data
@@ -13,13 +14,32 @@ import com.fortress.vault.core.SentinelController
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.core.ControlManager
 import com.fortress.vault.core.DeviceControl
+import com.fortress.vault.core.WebProtectionManager
 import com.fortress.vault.service.PackageChangeReinforceWorker
 
 class PackageChangeReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         com.fortress.vault.ui.screens.AppRepository.invalidateCache()
+        if (intent.action == ACTION_UNINSTALL_RESULT) {
+            val packageName = intent.getStringExtra(EXTRA_PACKAGE_NAME) ?: return
+            val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+            if (status != PackageInstaller.STATUS_SUCCESS) {
+                Log.e(
+                    "PackageChangeReceiver",
+                    "Could not remove newly installed package $packageName: " +
+                        (intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status $status")
+                )
+            }
+            return
+        }
+
         val packageName = intent.data?.schemeSpecificPart ?: return
+        if (intent.action == Intent.ACTION_PACKAGE_ADDED || intent.action == Intent.ACTION_PACKAGE_REPLACED) {
+            if (packageName == "com.android.chrome" || WebProtectionManager.isWebFilteringActive(context)) {
+                WebProtectionManager.apply(context, force = true)
+            }
+        }
         val isNewInstall = intent.action == Intent.ACTION_PACKAGE_ADDED &&
             !intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
         val blocksNewApps = ControlManager.activeLocks(context).any {

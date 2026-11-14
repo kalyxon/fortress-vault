@@ -23,6 +23,12 @@ class PackageChangeReinforceWorker(
         }
 
         val blockedPackages = VaultManager.blockedPackages(applicationContext)
+        if (appChangesBlocked &&
+            packageName !in blockedPackages &&
+            ControlManager.isInInstallBaseline(applicationContext, packageName)
+        ) {
+            return Result.success()
+        }
         if (!isPackageInstalled(packageName)) {
             return Result.success()
         }

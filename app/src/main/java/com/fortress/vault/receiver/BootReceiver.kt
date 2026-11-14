@@ -8,6 +8,8 @@ import com.fortress.vault.core.PackageFreezer
 import com.fortress.vault.core.PersistentVaultStore
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.core.ControlManager
+import com.fortress.vault.core.WebProtectionManager
+import com.fortress.vault.core.WebProtectionLockManager
 import com.fortress.vault.service.SentinelService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,11 +18,14 @@ import kotlinx.coroutines.launch
 class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED &&
-            intent.action != Intent.ACTION_LOCKED_BOOT_COMPLETED
-        ) return
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
 
-        if (!VaultManager.isSealed(context) && ControlManager.activeLocks(context).isEmpty()) return
+        WebProtectionLockManager.reconcileExpired(context)
+        WebProtectionManager.apply(context, force = true)
+        if (!VaultManager.isSealed(context) &&
+            ControlManager.activeLocks(context).isEmpty() &&
+            WebProtectionLockManager.activeLocks(context).isEmpty()
+        ) return
         ControlManager.apply(context)
         val seals = PersistentVaultStore.read(context) ?: VaultManager.activeSeals(context)
         VaultManager.enforceDeviceOwnerRestrictions(context)
