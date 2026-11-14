@@ -43,6 +43,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.fortress.vault.core.ControlManager
+import com.fortress.vault.core.WebProtectionLockManager
 import com.fortress.vault.core.DeviceSecurity
 import com.fortress.vault.core.OnboardingPrefs
 import com.fortress.vault.core.VaultManager
@@ -79,7 +80,13 @@ class MainActivity : FragmentActivity() {
 
     private fun hasActiveSealsOrLocks(): Boolean {
         cachedHasLocks?.let { return it }
-        val result = VaultManager.isSealed(this) || ControlManager.activeLocks(this).isNotEmpty()
+        val now = com.fortress.vault.core.TimeKeeper.estimateCurrentTrustedTimeMillis(this)
+        val hasWebProtectionLock = WebProtectionLockManager.activeLocks(this).values.any {
+            it.unlockAtMillis == 0L || now < it.unlockAtMillis
+        }
+        val result = VaultManager.isSealed(this) ||
+            ControlManager.activeLocks(this).isNotEmpty() ||
+            hasWebProtectionLock
         cachedHasLocks = result
         return result
     }
