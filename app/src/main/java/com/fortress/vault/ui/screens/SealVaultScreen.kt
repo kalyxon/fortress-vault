@@ -17,11 +17,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
-import com.fortress.vault.core.MAX_SEAL_DURATION_DAYS
 import com.fortress.vault.core.MAX_APPS_PER_SEAL
-import com.fortress.vault.core.MIN_SEAL_DURATION_DAYS
+import com.fortress.vault.core.MAX_SEAL_DURATION_HOURS
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.ui.theme.BrassPrimary
 import com.fortress.vault.ui.theme.CharcoalSurface
@@ -49,7 +49,9 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
 
     var step by remember { mutableStateOf(SealStep.SELECT_APPS) }
     var selectedPackages by remember { mutableStateOf(setOf<String>()) }
-    var durationDays by remember { mutableStateOf(30) }
+    var websiteDomains by remember { mutableStateOf<Map<String, Set<String>>>(emptyMap()) }
+    var durationAmount by remember { mutableIntStateOf(30) }
+    var durationInDays by remember { mutableStateOf(true) }
     var recoveryPhrase by remember { mutableStateOf<String?>(null) }
     var pendingSeal by remember { mutableStateOf<com.fortress.vault.core.Seal?>(null) }
     var hasWrittenDown by remember { mutableStateOf(false) }
@@ -149,6 +151,7 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                                             selectedPackages
                                         }
                                     } else {
+                                        websiteDomains = websiteDomains - app.packageName
                                         selectedPackages - app.packageName
                                     }
                                 }
@@ -170,39 +173,122 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
             }
 
             SealStep.SET_DURATION -> {
-                Text("For How Long?", style = MaterialTheme.typography.headlineMedium)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "This seal covers only the ${selectedPackages.size} app(s) you just picked. " +
-                        "Any other seals you have running are untouched.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                ) {
+                    Text("For How Long?", style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        "${selectedPackages.size} apps selected",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                Spacer(Modifier.height(32.dp))
-                Text("$durationDays days", style = MaterialTheme.typography.displayLarge, color = BrassPrimary)
-                Slider(
-                    value = durationDays.toFloat(),
-                    onValueChange = { durationDays = it.toInt() },
-                    valueRange = MIN_SEAL_DURATION_DAYS.toFloat()..MAX_SEAL_DURATION_DAYS.toFloat(),
-                    colors = SliderDefaults.colors(thumbColor = BrassPrimary, activeTrackColor = BrassPrimary)
-                )
-                errorMessage?.let {
-                    Spacer(Modifier.height(12.dp))
-                    Text(it, color = EmberRed)
+                    Spacer(Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = !durationInDays,
+                            onClick = {
+                                durationInDays = false
+                                durationAmount = durationAmount.coerceIn(1, 24)
+                            },
+                            label = { Text("Hours") }
+                        )
+                        FilterChip(
+                            selected = durationInDays,
+                            onClick = {
+                                durationInDays = true
+                                durationAmount = durationAmount.coerceIn(1, MAX_SEAL_DURATION_HOURS / 24)
+                            },
+                            label = { Text("Days") }
+                        )
+                    }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(18.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+                        )
+                    ) {
+                        Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                Text(
+                                    "Duration",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "$durationAmount ${if (durationInDays) "days" else "hours"}",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = BrassPrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Slider(
+                                value = durationAmount.toFloat(),
+                                onValueChange = { durationAmount = it.toInt().coerceAtLeast(1) },
+                                valueRange = 1f..if (durationInDays) {
+                                    (MAX_SEAL_DURATION_HOURS / 24).toFloat()
+                                } else {
+                                    24f
+                                },
+                                colors = SliderDefaults.colors(
+                                    thumbColor = BrassPrimary,
+                                    activeTrackColor = BrassPrimary
+                                )
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("1 ${if (durationInDays) "day" else "hour"}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "${if (durationInDays) MAX_SEAL_DURATION_HOURS / 24 else 24} ${if (durationInDays) "days" else "hours"}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    WebsiteDomainsEditor(
+                        apps = selectedPackages.map { packageName ->
+                            packageName to (installedApps.firstOrNull { it.packageName == packageName }?.label ?: packageName)
+                        }.sortedBy { it.second.lowercase() },
+                        websiteDomains = websiteDomains,
+                        onDomainsChanged = { websiteDomains = it }
+                    )
+                    errorMessage?.let {
+                        Spacer(Modifier.height(12.dp))
+                        Text(it, color = EmberRed)
+                    }
                 }
-                Spacer(Modifier.weight(1f))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(onClick = { step = SealStep.SELECT_APPS }) { Text("Back") }
                     Button(
-                        enabled = !isSealing,
+                        enabled = !isSealing &&
+                            durationAmount in 1..if (durationInDays) MAX_SEAL_DURATION_HOURS / 24 else 24,
                         onClick = {
                             isSealing = true
                             errorMessage = null
                             coroutineScope.launch {
                                 try {
-                                    val (seal, phrase) = VaultManager.prepareSeal(
-                                        context, selectedPackages, durationDays
-                                    )
+                                    val (seal, phrase) = withContext(Dispatchers.IO) {
+                                        VaultManager.prepareSeal(
+                                            context,
+                                            selectedPackages,
+                                            durationAmount * if (durationInDays) 24 else 1,
+                                            websiteDomains
+                                        )
+                                    }
                                     recoveryPhrase = phrase
                                     pendingSeal = seal
                                     step = SealStep.CONFIRM_SEAL
@@ -251,6 +337,18 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                         }
                     }
                     Spacer(Modifier.height(20.dp))
+                    if (seal?.websiteDomains?.isNotEmpty() == true) {
+                        Text("Websites to block in Chrome", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        seal.websiteDomains.forEach { (packageName, domains) ->
+                            val label = installedApps.firstOrNull { it.packageName == packageName }?.label ?: packageName
+                            Text(label, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                            domains.sorted().forEach { domain ->
+                                Text("- $domain and its subdomains", color = TextPrimary)
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
+                    }
                     Text("Unlock date", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(unlockDate, style = MaterialTheme.typography.titleLarge, color = BrassPrimary)

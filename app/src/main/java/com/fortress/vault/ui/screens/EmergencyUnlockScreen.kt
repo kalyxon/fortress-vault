@@ -89,11 +89,15 @@ fun EmergencyUnlockScreen(sealId: String, onUnlocked: () -> Unit, onCancel: () -
                 Button(
                     enabled = typedChallenge == challengeCode && recoveryInput.isNotBlank(),
                     onClick = {
-                        val success = VaultManager.attemptEmergencyUnlock(context, sealId, recoveryInput)
-                        if (success) {
-                            onUnlocked()
-                        } else {
-                            errorMessage = "That phrase doesn't match this seal. Attempts are limited."
+                        try {
+                            val success = VaultManager.attemptEmergencyUnlock(context, sealId, recoveryInput)
+                            if (success) {
+                                onUnlocked()
+                            } else {
+                                errorMessage = "That phrase doesn't match this seal. Attempts are limited."
+                            }
+                        } catch (error: IllegalStateException) {
+                            errorMessage = error.message ?: "Android could not safely unblock the sealed apps."
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmberRed)

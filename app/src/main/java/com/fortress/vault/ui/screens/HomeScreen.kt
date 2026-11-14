@@ -7,15 +7,21 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -50,6 +57,7 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
     var seals by remember { mutableStateOf(VaultManager.activeSeals(context)) }
     var extendTargetSealId by remember { mutableStateOf<String?>(null) }
     var detailsSealId by remember { mutableStateOf<String?>(null) }
+    var websiteRulesTargetSealId by remember { mutableStateOf<String?>(null) }
     var addAppsTargetSealId by remember { mutableStateOf<String?>(null) }
     var pendingAddedApps by remember { mutableStateOf<Pair<String, Set<String>>?>(null) }
     var pendingExtension by remember { mutableStateOf<Pair<String, Int>?>(null) }
@@ -68,53 +76,69 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
         }
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.End) {
-                IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Device controls") }
+    val detailsSeal = seals.firstOrNull { it.id == detailsSealId }
+    BackHandler(enabled = detailsSeal != null) { detailsSealId = null }
+
+    if (detailsSeal != null) {
+        SealDetailsScreen(
+            seal = detailsSeal,
+            context = context,
+            onDismiss = { detailsSealId = null },
+            onAddApps = { addAppsTargetSealId = detailsSeal.id },
+            onEditWebsites = {
+                websiteRulesTargetSealId = detailsSeal.id
+                detailsSealId = null
             }
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onSealVault,
-                containerColor = BrassPrimary,
-                contentColor = MaterialTheme.colorScheme.background,
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("New Seal") }
-            )
-        }
-    ) { padding ->
-        if (seals.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
-                Spacer(Modifier.height(16.dp))
-                Text("Nothing sealed right now.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        )
+    } else {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.End) {
+                    IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Device controls") }
+                }
+            },
+            floatingActionButton = {
+                ExtendedFloatingActionButton(
+                    onClick = onSealVault,
+                    containerColor = BrassPrimary,
+                    contentColor = MaterialTheme.colorScheme.background,
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    text = { Text("New Seal") }
+                )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 20.dp),
-                contentPadding = PaddingValues(top = 20.dp, bottom = 96.dp)
-            ) {
-                items(seals, key = { it.id }) { seal ->
-                    SealCard(
-                        seal = seal,
-                        tick = tick,
-                        onTap = { detailsSealId = seal.id },
-                        onExtend = { extendTargetSealId = seal.id },
-                        onEmergencyUnlock = { onEmergencyUnlock(seal.id) }
-                    )
+        ) { padding ->
+            if (seals.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.height(16.dp))
+                    Text("Nothing sealed right now.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(horizontal = 20.dp),
+                    contentPadding = PaddingValues(top = 20.dp, bottom = 96.dp)
+                ) {
+                    items(seals, key = { it.id }) { seal ->
+                        SealCard(
+                            seal = seal,
+                            tick = tick,
+                            onTap = { detailsSealId = seal.id },
+                            onExtend = { extendTargetSealId = seal.id },
+                            onEmergencyUnlock = { onEmergencyUnlock(seal.id) }
+                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
                 }
             }
         }
@@ -150,18 +174,31 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
         }
     }
 
-    if (detailsSealId != null) {
-        val detailsSeal = seals.firstOrNull { it.id == detailsSealId }
-        if (detailsSeal != null) {
-            SealDetailDialog(
-                seal = detailsSeal,
-                context = context,
-                onDismiss = { detailsSealId = null },
-                onAddApps = { addAppsTargetSealId = detailsSeal.id }
-            )
-        } else {
-            detailsSealId = null
-        }
+    if (detailsSealId != null && detailsSeal == null) {
+        detailsSealId = null
+    }
+
+    val websiteRulesSeal = seals.firstOrNull { it.id == websiteRulesTargetSealId }
+    if (websiteRulesSeal != null) {
+        WebsiteDomainsDialog(
+            seal = websiteRulesSeal,
+            context = context,
+            onDismiss = { websiteRulesTargetSealId = null },
+            onSave = { domains, onComplete ->
+                coroutineScope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            VaultManager.updateSealWebsiteDomains(context, websiteRulesSeal.id, domains)
+                        }
+                        seals = withContext(Dispatchers.IO) { VaultManager.activeSeals(context) }
+                        onComplete(null)
+                    } catch (error: Exception) {
+                        seals = withContext(Dispatchers.IO) { VaultManager.activeSeals(context) }
+                        onComplete(error.message ?: "Chrome could not apply the website rules.")
+                    }
+                }
+            }
+        )
     }
 
     val addAppsTarget = addAppsTargetSealId
@@ -275,18 +312,309 @@ private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> 
 private data class PackageEntry(val packageName: String, val label: String)
 
 @Composable
-private fun SealDetailDialog(
+private fun SealDetailsScreen(
     seal: Seal,
     context: android.content.Context,
     onDismiss: () -> Unit,
-    onAddApps: () -> Unit
+    onAddApps: () -> Unit,
+    onEditWebsites: () -> Unit
 ) {
     val uniquePackages = remember(seal) { seal.packages.toList().distinct() }
+    var detailTick by remember(seal.id) { mutableLongStateOf(0L) }
+    LaunchedEffect(seal.id) {
+        while (true) {
+            delay(60_000)
+            detailTick = System.currentTimeMillis()
+        }
+    }
+    val remainingLabel = remember(seal.id, detailTick) {
+        VaultManager.remainingLabelFor(context, seal)
+    }
 
-    // Load labels asynchronously on IO to avoid blocking composition thread
     val apps by produceState<List<PackageEntry>>(initialValue = emptyList(), uniquePackages) {
         value = withContext(Dispatchers.IO) {
             uniquePackages.map { packageName ->
+                val label = runCatching {
+                    val appInfo = context.packageManager.getApplicationInfo(
+                        packageName,
+                        android.content.pm.PackageManager.MATCH_UNINSTALLED_PACKAGES
+                    )
+                    context.packageManager.getApplicationLabel(appInfo).toString()
+                }.getOrElse { packageName.toAppDisplayName() }
+                PackageEntry(packageName, label)
+            }.sortedBy { it.label.lowercase() }
+        }
+    }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to seals")
+                }
+                Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
+                    Text(
+                        "SEAL DETAILS",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = BrassPrimary
+                    )
+                    Text(
+                        "Your focus is protected",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    Icons.Filled.Shield,
+                    contentDescription = null,
+                    tint = BrassPrimary,
+                    modifier = Modifier.padding(end = 12.dp).size(24.dp)
+                )
+            }
+        },
+        bottomBar = {
+            Surface(color = MaterialTheme.colorScheme.background, shadowElevation = 12.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onEditWebsites,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BrassPrimary),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BrassPrimary.copy(alpha = 0.55f))
+                    ) {
+                        Icon(Icons.Filled.Language, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Websites")
+                    }
+                    Button(
+                        onClick = onAddApps,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrassPrimary,
+                            contentColor = MaterialTheme.colorScheme.background
+                        )
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add apps")
+                    }
+                }
+            }
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(26.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(22.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .background(BrassPrimary.copy(alpha = 0.12f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    "ACTIVE SEAL",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = BrassPrimary
+                                )
+                                Text(
+                                    "${seal.packages.size} protected app${if (seal.packages.size == 1) "" else "s"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(24.dp))
+                        Text(
+                            remainingLabel,
+                            style = CountdownStyle.copy(fontSize = 42.sp, letterSpacing = 0.5.sp),
+                            color = BrassPrimary
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "REMAINING",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(20.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+                        Spacer(Modifier.height(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.CalendarMonth,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Unlocks automatically",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    formatSealDate(seal.unlockAtMillis),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("PROTECTED APPS", style = MaterialTheme.typography.labelLarge, color = BrassPrimary)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Unavailable until the seal ends",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        "${seal.packages.size}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (apps.isEmpty()) {
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = BrassPrimary, strokeWidth = 2.dp)
+                    }
+                }
+            } else {
+                items(apps, key = { it.packageName }) { app ->
+                    val icon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                        initialValue = null,
+                        app.packageName
+                    ) {
+                        value = com.fortress.vault.core.IconCache.getIconAsync(context, app.packageName)
+                    }
+                    val domains = seal.websiteDomains[app.packageName].orEmpty().sorted()
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(BrassPrimary.copy(alpha = 0.10f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                icon?.let { appIcon ->
+                                    Image(
+                                        bitmap = appIcon,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
+                                    )
+                                } ?: run {
+                                    Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    app.label,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    if (domains.isEmpty()) "App access sealed" else "${domains.size} website rule${if (domains.size == 1) "" else "s"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (domains.isNotEmpty()) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        domains.joinToString(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = BrassPrimary.copy(alpha = 0.9f),
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                val websiteRuleCount = seal.websiteDomains.values.sumOf { it.size }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Language, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Website protection", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (websiteRuleCount == 0) "No website rules added" else "$websiteRuleCount blocked website${if (websiteRuleCount == 1) "" else "s"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebsiteDomainsDialog(
+    seal: Seal,
+    context: android.content.Context,
+    onDismiss: () -> Unit,
+    onSave: (Map<String, Set<String>>, (String?) -> Unit) -> Unit
+) {
+    var domains by remember(seal.id) { mutableStateOf(seal.websiteDomains) }
+    var saving by remember(seal.id) { mutableStateOf(false) }
+    var errorMessage by remember(seal.id) { mutableStateOf<String?>(null) }
+    val apps by produceState<List<PackageEntry>>(initialValue = emptyList(), seal.id) {
+        value = withContext(Dispatchers.IO) {
+            seal.packages.map { packageName ->
                 val label = runCatching {
                     val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
                     context.packageManager.getApplicationLabel(appInfo).toString()
@@ -297,61 +625,54 @@ private fun SealDetailDialog(
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Seal details") },
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("Websites for this seal") },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())
+            ) {
                 Text(
-                    "This seal is blocking ${seal.packages.size} app${if (seal.packages.size == 1) "" else "s"}.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    "Add domains to block in managed Chrome for each sealed app. Once saved, a domain cannot be removed until this seal ends.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
                 Spacer(Modifier.height(12.dp))
                 if (apps.isEmpty()) {
                     CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.CenterHorizontally).size(24.dp),
-                        color = BrassPrimary,
-                        strokeWidth = 2.dp
+                        color = BrassPrimary
                     )
                 } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                        items(apps, key = { it.packageName }) { app ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val icon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, app.packageName) {
-                                    value = com.fortress.vault.core.IconCache.getIconAsync(context, app.packageName)
-                                }
-                                val currentIcon = icon
-                                if (currentIcon != null) {
-                                    Image(
-                                        bitmap = currentIcon,
-                                        contentDescription = app.label,
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(app.label, style = MaterialTheme.typography.bodyLarge)
-                                    Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
+                    WebsiteDomainsEditor(
+                        apps = apps.map { it.packageName to it.label },
+                        websiteDomains = domains,
+                        allowRemove = false,
+                        onDomainsChanged = { domains = it }
+                    )
+                }
+                errorMessage?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error)
                 }
             }
         },
         confirmButton = {
-            Row {
-                TextButton(onClick = onAddApps) { Text("Add apps", color = BrassPrimary) }
-                TextButton(onClick = onDismiss) { Text("Close", color = BrassPrimary) }
+            TextButton(
+                enabled = apps.isNotEmpty() && !saving,
+                onClick = {
+                    saving = true
+                    errorMessage = null
+                    onSave(domains) { error ->
+                        saving = false
+                        if (error == null) onDismiss() else errorMessage = error
+                    }
+                }
+            ) {
+                Text(if (saving) "Applying..." else "Save websites", color = BrassPrimary)
             }
+        },
+        dismissButton = {
+            TextButton(enabled = !saving, onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
@@ -590,4 +911,14 @@ private fun ExtendSealConfirmationDialog(
 }
 
 private fun formatSealDate(epochMillis: Long): String =
-    SimpleDateFormat("EEE, d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(epochMillis))
+    SimpleDateFormat("d MMM · HH:mm", Locale.getDefault()).format(Date(epochMillis))
+
+private fun String.toAppDisplayName(): String {
+    val ignoredSegments = setOf("android", "app", "mobile", "client", "lite")
+    val name = split('.').lastOrNull { it.isNotBlank() && it.lowercase() !in ignoredSegments }
+        ?: substringAfterLast('.')
+    return name
+        .replace(Regex("([a-z])([A-Z])"), "$1 $2")
+        .replace('_', ' ')
+        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+}
