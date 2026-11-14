@@ -15,8 +15,12 @@ device and Android version you plan to use.
 - Limits each seal to 20 apps to keep policy enforcement responsive.
 - Seals those apps until the configured unlock time.
 - Restores the sealed state after reboot and app replacement.
+- Unlocks a seal only after Android confirms the apps are unhidden and
+  unsuspended; an app still covered by another active seal remains blocked.
 - Offers independent device controls for USB debugging, user accounts, and app
   installation changes, each protected by its own timer and recovery phrase.
+- Provides optional web protection, including Chrome domain blocks, per-seal
+  website rules, and optional Private DNS filtering.
 - Requires a secure phone lock (PIN, password, or pattern) before the vault or
   device controls can be used.
 - Requires device-credential verification each time Fortress returns to the
@@ -141,10 +145,15 @@ app/src/main/java/com/fortress/vault/
 ├── FortressAdminReceiver.kt       # Layer 1 — Device Admin/Owner authority
 ├── MainActivity.kt                # Compose NavHost: Setup → Home → Seal/Emergency
 ├── core/
-│   ├── VaultManager.kt            # single source of truth for sealed state
+│   ├── VaultManager.kt            # seal lifecycle, persistence, and enforcement
+│   ├── PersistentVaultStore.kt    # Device Owner-backed seal state
+│   ├── ControlManager.kt          # independent device-control locks
 │   ├── DeviceSecurity.kt          # secure phone-lock prerequisite
-│   ├── PackageFreezer.kt          # Layer 2 — hide app + strip permissions
+│   ├── PackageFreezer.kt          # hide, suspend, restore, and permission policy
 │   ├── TimeKeeper.kt              # Layer 3 — network-time verification
+│   ├── WebProtectionManager.kt    # Chrome and device-wide web protections
+│   ├── WebProtectionLockManager.kt # independent web-protection locks
+│   ├── WebsiteDomain.kt           # website address normalization
 │   ├── SentinelController.kt      # starts/stops service + WorkManager backup
 │   └── RecoveryPhraseGenerator.kt # emergency-unlock phrase
 ├── service/
@@ -152,10 +161,14 @@ app/src/main/java/com/fortress/vault/
 │   └── SentinelWorker.kt          # WorkManager dead-man's-switch
 ├── receiver/
 │   ├── BootReceiver.kt            # re-freeze before launcher loads
-│   └── PackageChangeReceiver.kt   # instant re-freeze on reinstall
+│   └── PackageChangeReceiver.kt   # enforce seals on package changes
 └── ui/
     ├── theme/                     # dark "vault" Material3 theme
-    └── screens/                   # Setup, Home, SealVault, EmergencyUnlock
+    └── screens/
+        ├── HomeScreen.kt
+        ├── SealVaultScreen.kt
+        ├── SettingsScreen.kt
+        └── WebsiteDomainsEditor.kt # custom domain list editor
 ```
 
 ## Important limitations
@@ -177,9 +190,15 @@ app/src/main/java/com/fortress/vault/
   update, while newly installed packages are suspended and removed. This mode
   is limited to 90 days. Package broadcasts are the fast path; a low-frequency
   watchdog is a recovery path for devices that miss package broadcasts.
+  Restoring an app after a seal ends does not disable this separate control;
+  Fortress records restored apps as existing so the control does not mistake
+  them for new installs.
 - The optional full-block mode is limited to 30 days and applies Android's
   `DISALLOW_INSTALL_APPS` and `DISALLOW_UNINSTALL_APPS` restrictions. It blocks
   new installs, app updates, and user uninstalls for the duration.
+- App-install controls and app seals are independent. Emergency-unlocking a
+  seal does not unlock an active app-install control, and an app included in
+  another active seal remains blocked.
 - Android does not expose a public policy that can reject only new installs
   while allowing replacements. Update-friendly mode can therefore have a
   brief interval before a new package is detected and removed. OTA/system
@@ -187,6 +206,10 @@ app/src/main/java/com/fortress/vault/
 - Active seal packages are suspended, hidden, uninstall-protected, and
   re-frozen after package-change events. Runtime permissions are revoked when
   Fortress freezes a package.
+- Web protections are optional and have different scopes: Private DNS affects
+  device-wide DNS lookups, while Chrome domain and incognito policies apply
+  only to managed Google Chrome. They do not inspect HTTPS traffic or guarantee
+  filtering in other browsers.
 - Background enforcement is not free: Fortress uses a foreground service while
   protection is active. Package events handle immediate changes; the fallback
   scan runs once per minute and trusted network-time verification runs every
