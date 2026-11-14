@@ -1,6 +1,5 @@
 package com.fortress.vault.ui.screens
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -13,6 +12,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.fortress.vault.core.VaultManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class AppLockActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,8 +43,10 @@ class AppLockActivity : ComponentActivity() {
 @Composable
 private fun AppLockScreen(packageName: String, onDone: (Boolean) -> Unit) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var phrase by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var isUnlocking by remember { mutableStateOf(false) }
 
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier
@@ -56,16 +60,27 @@ private fun AppLockScreen(packageName: String, onDone: (Boolean) -> Unit) {
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Spacer(Modifier.height(12.dp))
             Row {
-                Button(onClick = {
-                    // Try to grant temporary access for this package (30s)
-                    val granted = VaultManager.grantTemporaryAccess(context, packageName, 30_000L, phrase)
-                    if (granted) {
-                        onDone(true)
-                    } else {
-                        error = "Incorrect phrase or cooldown"
+                Button(
+                    enabled = !isUnlocking,
+                    onClick = {
+                        isUnlocking = true
+                        error = null
+                        coroutineScope.launch {
+                            try {
+                                val granted = withContext(Dispatchers.IO) {
+                                    VaultManager.grantTemporaryAccess(context, packageName, 30_000L, phrase)
+                                }
+                                if (granted) onDone(true)
+                                else error = "Incorrect phrase, cooldown active, or temporary access unavailable."
+                            } catch (failure: Exception) {
+                                error = failure.message ?: "Temporary access could not be applied."
+                            } finally {
+                                isUnlocking = false
+                            }
+                        }
                     }
-                }) {
-                    Text("Unlock temporarily")
+                ) {
+                    Text(if (isUnlocking) "Unlocking..." else "Unlock temporarily")
                 }
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { onDone(false) }) { Text("Cancel") }

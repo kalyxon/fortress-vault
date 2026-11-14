@@ -18,7 +18,9 @@ data class Seal(
      *  0 means no penalty has ever been applied. Used to prevent stacking. */
     val lastPenaltyAtMillis: Long = 0L,
     /** True while user-switching is restricted for this seal's lifetime. */
-    val blockUserSwitch: Boolean = false
+    val blockUserSwitch: Boolean = false,
+    /** Domains to block in Chrome, associated with each app in this seal. */
+    val websiteDomains: Map<String, Set<String>> = emptyMap()
 )
 
 object SealCodec {
@@ -50,11 +52,27 @@ object SealCodec {
         put("cooldownUntil", seal.cooldownUntilMillis)
         put("lastPenaltyAt", seal.lastPenaltyAtMillis)
         put("blockUserSwitch", seal.blockUserSwitch)
+        put("websiteDomains", JSONObject().apply {
+            seal.websiteDomains.forEach { (packageName, domains) ->
+                put(packageName, JSONArray(domains.toList()))
+            }
+        })
     }
 
     private fun decodeOne(obj: JSONObject): Seal {
         val packagesArray = obj.getJSONArray("packages")
         val packages = (0 until packagesArray.length()).map { packagesArray.getString(it) }.toSet()
+        val websiteDomainsObject = obj.optJSONObject("websiteDomains")
+        val websiteDomains = buildMap {
+            if (websiteDomainsObject != null) {
+                val keys = websiteDomainsObject.keys()
+                while (keys.hasNext()) {
+                    val packageName = keys.next()
+                    val domains = websiteDomainsObject.optJSONArray(packageName) ?: continue
+                    put(packageName, (0 until domains.length()).map { domains.getString(it) }.toSet())
+                }
+            }
+        }
         return Seal(
             id = obj.getString("id"),
             packages = packages,
@@ -67,7 +85,8 @@ object SealCodec {
             failedAttempts = obj.optInt("failedAttempts", 0),
             cooldownUntilMillis = obj.optLong("cooldownUntil", 0L),
             lastPenaltyAtMillis = obj.optLong("lastPenaltyAt", 0L),
-            blockUserSwitch = obj.optBoolean("blockUserSwitch", false)
+            blockUserSwitch = obj.optBoolean("blockUserSwitch", false),
+            websiteDomains = websiteDomains
         )
     }
 }
