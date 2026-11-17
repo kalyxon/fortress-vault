@@ -20,7 +20,10 @@ device and Android version you plan to use.
 - Offers independent device controls for USB debugging, user accounts, and app
   installation changes, each protected by its own timer and recovery phrase.
 - Provides optional web protection, including Chrome domain blocks, per-seal
-  website rules, and optional Private DNS filtering.
+  website rules, an independent Chrome Incognito control, and optional Private
+  DNS filtering.
+- Enforces per-app daily foreground-use limits by suspending apps when their
+  allowance is reached and restoring access at the next local day.
 - Requires a secure phone lock (PIN, password, or pattern) before the vault or
   device controls can be used.
 - Requires device-credential verification each time Fortress returns to the
