@@ -1,6 +1,7 @@
 package com.fortress.vault.ui.screens
 
 import android.content.Intent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -29,10 +30,12 @@ import com.fortress.vault.ui.theme.EmberRed
 import com.fortress.vault.ui.theme.SteelSurfaceHigh
 import com.fortress.vault.ui.theme.TextPrimary
 import com.fortress.vault.ui.theme.TextSecondary
+import com.fortress.vault.ui.theme.VaultDivider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Warning
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +67,10 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
     // sealByPackage and hasSecureLock are computed on IO to avoid main-thread IPC/KeyguardManager calls
     var sealByPackage by remember { mutableStateOf<Map<String, com.fortress.vault.core.Seal>>(emptyMap()) }
     var hasSecureLock by remember { mutableStateOf(true) } // optimistic default until IO confirms
+    val stepProgress by animateFloatAsState(
+        targetValue = (step.ordinal + 1) / SealStep.entries.size.toFloat(),
+        label = "seal-setup-progress"
+    )
 
     LaunchedEffect(Unit) {
         // Load apps, sealed package map, and secure lock check all on IO
@@ -89,34 +96,57 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
             .padding(24.dp)
     ) {
         if (!hasSecureLock) {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(10.dp))
                     Text(
                         "Phone Lock Required to Create Seal",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer
+                        color = MaterialTheme.colorScheme.error
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Please set a PIN, pattern, or password in phone settings before creating a seal so your protection stays secure.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text("Set Phone Lock Now", color = MaterialTheme.colorScheme.onError)
-                    }
                 }
+                Text(
+                    "Set a PIN, pattern or password before creating a seal.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+                TextButton(
+                    onClick = { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)) },
+                    contentPadding = PaddingValues(horizontal = 0.dp)
+                ) { Text("Set phone lock") }
             }
         }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                when (step) {
+                    SealStep.SELECT_APPS -> "SELECT APPS"
+                    SealStep.SET_DURATION -> "SET DURATION"
+                    SealStep.CONFIRM_SEAL -> "REVIEW SEAL"
+                    SealStep.SHOW_RECOVERY_PHRASE -> "RECOVERY PHRASE"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = BrassPrimary
+            )
+            Text(
+                "${step.ordinal + 1} of ${SealStep.entries.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        LinearProgressIndicator(
+            progress = { stepProgress },
+            modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(3.dp)),
+            color = BrassPrimary,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+        Spacer(Modifier.height(20.dp))
 
         when (step) {
             SealStep.SELECT_APPS -> {
@@ -205,16 +235,7 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                             label = { Text("Days") }
                         )
                     }
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(18.dp),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
-                        )
-                    ) {
-                        Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -255,7 +276,7 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
                         }
                     }
                     Spacer(Modifier.height(24.dp))
@@ -325,14 +346,11 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                     Spacer(Modifier.height(20.dp))
                     Text("Apps to block (${appLabels.size})", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            appLabels.forEach { label ->
-                                Text("- $label", color = TextPrimary)
-                                Spacer(Modifier.height(4.dp))
+                    Column(Modifier.fillMaxWidth()) {
+                        appLabels.forEachIndexed { index, label ->
+                            Text(label, color = TextPrimary, modifier = Modifier.padding(vertical = 6.dp))
+                            if (index < appLabels.lastIndex) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
                             }
                         }
                     }
@@ -377,17 +395,13 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(20.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            recoveryPhrase ?: "",
-                            modifier = Modifier.padding(20.dp),
-                            style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-                            color = BrassPrimary
-                        )
-                    }
+                    Text(
+                        recoveryPhrase ?: "",
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                        color = BrassPrimary
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
                     Spacer(Modifier.height(20.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
@@ -474,15 +488,7 @@ private fun UserSwitchBlockDialog(
                 )
                 Spacer(Modifier.height(16.dp))
 
-                // Option 1 Card: Block Switching
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(EmberRed.copy(alpha = 0.08f)),
-                    colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.Block,
@@ -499,24 +505,14 @@ private fun UserSwitchBlockDialog(
                         }
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "Disables Guest Mode & secondary profiles while sealed. Prevents all bypasses since Android pauses background enforcement in Guest mode.",
+                            text = "Disables Guest Mode and secondary profiles while sealed.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = TextPrimary.copy(alpha = 0.9f)
+                            color = TextSecondary
                         )
-                    }
+                    HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(top = 12.dp))
                 }
 
-                Spacer(Modifier.height(12.dp))
-
-                // Option 2 Card: Package Freeze Only
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(SteelSurfaceHigh),
-                    colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.Lock,
@@ -533,11 +529,10 @@ private fun UserSwitchBlockDialog(
                         }
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "Freezes apps in existing user accounts, but allows user switching. Note: Fresh Guest sessions may reinstall apps in their clean space.",
+                            text = "Freezes apps in this user account; user switching remains available.",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
-                    }
                 }
             }
         },
@@ -635,11 +630,6 @@ private fun AppRow(
                 app.label,
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (isLocked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                app.packageName,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 

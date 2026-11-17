@@ -14,7 +14,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -105,16 +104,11 @@ fun WebsiteDomainsEditor(
                             }
                         )
                     } else {
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.secondaryContainer
-                        ) {
-                            Text(
-                                domain,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        }
+                        Text(
+                            domain,
+                            modifier = Modifier.padding(vertical = 6.dp),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
                 }
             }

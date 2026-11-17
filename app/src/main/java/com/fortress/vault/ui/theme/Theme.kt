@@ -9,6 +9,7 @@ private val FortressColorScheme = darkColorScheme(
     primary = BrassPrimary,
     onPrimary = ObsidianBlack,
     secondary = BrassPrimaryDim,
+    onSecondary = TextPrimary,
     background = ObsidianBlack,
     onBackground = TextPrimary,
     surface = CharcoalSurface,
@@ -17,7 +18,9 @@ private val FortressColorScheme = darkColorScheme(
     onSurfaceVariant = TextSecondary,
     error = EmberRed,
     onError = TextPrimary,
-    outline = VaultDivider
+    outline = VaultDivider,
+    outlineVariant = VaultDivider.copy(alpha = 0.65f),
+    surfaceTint = BrassPrimary
 )
 
 @Composable

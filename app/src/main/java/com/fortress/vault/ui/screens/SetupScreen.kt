@@ -7,7 +7,7 @@ import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Shield
@@ -100,21 +100,15 @@ fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
             description = null
         )
 
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            shape = RoundedCornerShape(12.dp)
-        ) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
             Row(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     ADB_COMMAND,
                     style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).horizontalScroll(rememberScrollStateCompat())
                 )
                 IconButton(onClick = {
                     clipboard.setText(AnnotatedString(ADB_COMMAND))
@@ -122,6 +116,7 @@ fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = "Copy command", tint = BrassPrimary)
                 }
             }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
         }
 
         SetupStep(

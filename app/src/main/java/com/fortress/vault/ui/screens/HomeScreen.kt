@@ -1,6 +1,11 @@
 package com.fortress.vault.ui.screens
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -8,7 +13,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -21,6 +25,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -94,8 +99,27 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.End) {
-                    IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Device controls") }
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Filled.Shield, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(22.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text("Fortress Vault", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    }
+                    IconButton(onClick = onSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             },
             floatingActionButton = {
@@ -119,7 +143,13 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
                 ) {
                     Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.height(16.dp))
-                    Text("Nothing sealed right now.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Nothing sealed right now", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Choose apps to pause distractions and set a time to unlock them.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             } else {
                 LazyColumn(
@@ -129,6 +159,15 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
                         .padding(horizontal = 20.dp),
                     contentPadding = PaddingValues(top = 20.dp, bottom = 96.dp)
                 ) {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Active seals", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                    }
                     items(seals, key = { it.id }) { seal ->
                         SealCard(
                             seal = seal,
@@ -137,7 +176,6 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
                             onExtend = { extendTargetSealId = seal.id },
                             onEmergencyUnlock = { onEmergencyUnlock(seal.id) }
                         )
-                        Spacer(Modifier.height(16.dp))
                     }
                 }
             }
@@ -262,48 +300,48 @@ private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> 
         VaultManager.remainingLabelFor(context, seal)
     }
 
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(vertical = 8.dp)
             .clickable(onClick = onTap),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(BrassPrimary.copy(alpha = 0.12f), shape = CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
-                }
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text(remainingLabel, style = CountdownStyle.copy(fontSize = 28.sp), color = BrassPrimary)
-                    Text(
-                        "${seal.packages.size} app${if (seal.packages.size == 1) "" else "s"} sealed",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+            AnimatedContent(
+                targetState = remainingLabel,
+                transitionSpec = {
+                    fadeIn(tween(120)) togetherWith fadeOut(tween(80))
+                },
+                label = "seal-countdown"
+            ) { label ->
+                Text(label, style = CountdownStyle.copy(fontSize = 32.sp, letterSpacing = 0.25.sp), color = BrassPrimary)
             }
-
-            Spacer(Modifier.height(16.dp))
-            AppIconRow(context, seal.packages)
-
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "${seal.packages.size} protected app${if (seal.packages.size == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.weight(1f))
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Seal details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                TextButton(onClick = onExtend) {
-                    Text("Add time", color = BrassPrimary)
-                }
-                TextButton(onClick = onEmergencyUnlock) {
-                    Text("Emergency unlock", color = EmberRed)
-                }
+                TextButton(onClick = onExtend) { Text("Add time") }
+                TextButton(
+                    onClick = onEmergencyUnlock,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("Emergency unlock") }
             }
         }
     }
@@ -356,54 +394,20 @@ private fun SealDetailsScreen(
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to seals")
                 }
-                Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
-                    Text(
-                        "SEAL DETAILS",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = BrassPrimary
-                    )
-                    Text(
-                        "Your focus is protected",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Icon(
-                    Icons.Filled.Shield,
-                    contentDescription = null,
-                    tint = BrassPrimary,
-                    modifier = Modifier.padding(end = 12.dp).size(24.dp)
-                )
+                Text("Seal details", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             }
         },
         bottomBar = {
-            Surface(color = MaterialTheme.colorScheme.background, shadowElevation = 12.dp) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Column {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+                Button(
+                    onClick = onAddApps,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary, contentColor = MaterialTheme.colorScheme.background)
                 ) {
-                    OutlinedButton(
-                        onClick = onEditWebsites,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BrassPrimary),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, BrassPrimary.copy(alpha = 0.55f))
-                    ) {
-                        Icon(Icons.Filled.Language, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Websites")
-                    }
-                    Button(
-                        onClick = onAddApps,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = BrassPrimary,
-                            contentColor = MaterialTheme.colorScheme.background
-                        )
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Add apps")
-                    }
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add apps")
                 }
             }
         },
@@ -411,73 +415,36 @@ private fun SealDetailsScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Card(
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(26.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp
                 ) {
-                    Column(modifier = Modifier.padding(22.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .background(BrassPrimary.copy(alpha = 0.12f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    "ACTIVE SEAL",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = BrassPrimary
-                                )
-                                Text(
-                                    "${seal.packages.size} protected app${if (seal.packages.size == 1) "" else "s"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+                        Text("Time remaining", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(8.dp))
+                        AnimatedContent(
+                            targetState = remainingLabel,
+                            transitionSpec = {
+                                fadeIn(tween(120)) togetherWith fadeOut(tween(80))
+                            },
+                            label = "detail-countdown"
+                        ) { label ->
+                            Text(label, style = CountdownStyle.copy(fontSize = 38.sp, letterSpacing = 0.25.sp), color = BrassPrimary)
                         }
-                        Spacer(Modifier.height(24.dp))
-                        Text(
-                            remainingLabel,
-                            style = CountdownStyle.copy(fontSize = 42.sp, letterSpacing = 0.5.sp),
-                            color = BrassPrimary
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "REMAINING",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(20.dp))
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Filled.CalendarMonth,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
+                            Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Unlocks ${formatSealDate(seal.unlockAtMillis)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "Unlocks automatically",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    formatSealDate(seal.unlockAtMillis),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
                         }
                     }
                 }
@@ -485,24 +452,11 @@ private fun SealDetailsScreen(
 
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("PROTECTED APPS", style = MaterialTheme.typography.labelLarge, color = BrassPrimary)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Unavailable until the seal ends",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        "${seal.packages.size}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text("Protected apps", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("${uniquePackages.size}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -521,81 +475,46 @@ private fun SealDetailsScreen(
                         value = com.fortress.vault.core.IconCache.getIconAsync(context, app.packageName)
                     }
                     val domains = seal.websiteDomains[app.packageName].orEmpty().sorted()
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
+                    Column(Modifier.fillMaxWidth()) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(BrassPrimary.copy(alpha = 0.10f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                icon?.let { appIcon ->
-                                    Image(
-                                        bitmap = appIcon,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
-                                    )
-                                } ?: run {
-                                    Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
-                                }
-                            }
+                            icon?.let { appIcon ->
+                                Image(bitmap = appIcon, contentDescription = null, modifier = Modifier.size(38.dp).clip(RoundedCornerShape(8.dp)))
+                            } ?: Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(24.dp))
                             Spacer(Modifier.width(14.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    app.label,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    if (domains.isEmpty()) "App access sealed" else "${domains.size} website rule${if (domains.size == 1) "" else "s"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            Column(Modifier.weight(1f)) {
+                                Text(app.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                                 if (domains.isNotEmpty()) {
-                                    Spacer(Modifier.height(2.dp))
                                     Text(
                                         domains.joinToString(),
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = BrassPrimary.copy(alpha = 0.9f),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 2
                                     )
                                 }
                             }
                         }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
                     }
                 }
             }
 
             item {
                 val websiteRuleCount = seal.websiteDomains.values.sumOf { it.size }
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onEditWebsites).padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Filled.Language, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Website protection", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                            Text(
-                                if (websiteRuleCount == 0) "No website rules added" else "$websiteRuleCount blocked website${if (websiteRuleCount == 1) "" else "s"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    Icon(Icons.Filled.Language, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        if (websiteRuleCount == 0) "Add website rules" else "Website rules · $websiteRuleCount",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "Edit website rules", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -809,39 +728,6 @@ private fun AddAppsConfirmationDialog(
             TextButton(onClick = onDismiss) { Text("Back") }
         }
     )
-}
-
-@Composable
-private fun AppIconRow(context: android.content.Context, packages: Set<String>) {
-    val uniquePackages = remember(packages) { packages.toList().distinct() }
-    Row {
-        uniquePackages.take(8).forEach { pkg ->
-            val icon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, pkg) {
-                value = com.fortress.vault.core.IconCache.getIconAsync(context, pkg)
-            }
-            if (icon != null) {
-                Image(
-                    bitmap = icon!!,
-                    contentDescription = pkg,
-                    modifier = Modifier
-                        .padding(end = 8.dp)
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-            }
-        }
-        if (uniquePackages.size > 8) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("+${uniquePackages.size - 8}", style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-    }
 }
 
 @Composable
