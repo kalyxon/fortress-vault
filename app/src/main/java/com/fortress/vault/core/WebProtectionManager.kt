@@ -18,6 +18,7 @@ object WebProtectionManager {
     private const val KEY_BLOCK_ADULT = "block_adult_sites"
     private const val KEY_BLOCK_BYPASS_APPS = "block_bypass_apps"
     private const val KEY_BLOCK_SEALED_APP_SITES = "block_sealed_app_sites"
+    private const val KEY_BLOCK_CHROME_INCOGNITO = "block_chrome_incognito"
     private const val KEY_APPLIED_ADULT = "applied_adult_sites"
     private const val KEY_APPLIED_BYPASS = "applied_bypass_protection"
     private const val KEY_APPLIED_SEALED_PACKAGES = "applied_sealed_packages"
@@ -29,6 +30,7 @@ object WebProtectionManager {
     private const val CHROME_PACKAGE = "com.android.chrome"
     private const val ADULT_DNS_HOST = "adult-filter-dns.cleanbrowsing.org"
     private const val CHROME_INCOGNITO_DISABLED = 1
+    private const val CHROME_INCOGNITO_ENABLED = 0
     private const val TAG = "WebProtection"
 
     private val bypassPackages = setOf(
@@ -86,6 +88,15 @@ object WebProtectionManager {
 
     fun blockSealedAppSites(context: Context): Boolean =
         preferences(context).getBoolean(KEY_BLOCK_SEALED_APP_SITES, true)
+
+    fun blockChromeIncognito(context: Context): Boolean {
+        PersistentVaultStore.readChromeIncognito(context)?.let { return it }
+        val saved = preferences(context).getBoolean(KEY_BLOCK_CHROME_INCOGNITO, false)
+        if (context.getSystemService(DevicePolicyManager::class.java).isDeviceOwnerApp(context.packageName)) {
+            PersistentVaultStore.writeChromeIncognito(context, saved)
+        }
+        return saved
+    }
 
     fun isPackageHiddenByBypassProtection(context: Context, packageName: String): Boolean =
         blockBypassApps(context) &&
@@ -158,14 +169,38 @@ object WebProtectionManager {
         }
 
     fun isWebFilteringActive(context: Context): Boolean =
-        blockAdultSites(context) || blockBypassApps(context) || hasSealedWebsiteTargets(context)
+        blockAdultSites(context) || blockBypassApps(context) ||
+            blockChromeIncognito(context) || hasSealedWebsiteTargets(context)
 
     fun isSettingEnabled(context: Context, setting: WebProtectionSetting): Boolean =
         when (setting) {
             WebProtectionSetting.ADULT_SITES -> blockAdultSites(context)
             WebProtectionSetting.CHROME_ONLY -> blockBypassApps(context)
             WebProtectionSetting.SEALED_APP_WEBSITES -> blockSealedAppSites(context)
+            WebProtectionSetting.CHROME_INCOGNITO -> blockChromeIncognito(context)
+            WebProtectionSetting.APP_TIME_LIMITS -> AppTimeLimitManager.isEnabled(context)
         }
+
+    fun setBlockChromeIncognito(context: Context, enabled: Boolean): Boolean {
+        if (WebProtectionLockManager.isLocked(context, WebProtectionSetting.CHROME_INCOGNITO)) return false
+        val dpm = context.getSystemService(DevicePolicyManager::class.java)
+        if (!dpm.isDeviceOwnerApp(context.packageName)) return false
+        val prefs = preferences(context)
+        val previous = blockChromeIncognito(context)
+        try {
+            PersistentVaultStore.writeChromeIncognito(context, enabled)
+        } catch (error: Exception) {
+            Log.e(TAG, "Could not persist the Chrome Incognito setting", error)
+            return false
+        }
+        prefs.edit().putBoolean(KEY_BLOCK_CHROME_INCOGNITO, enabled).apply()
+        if (tryApply(context)) return true
+        runCatching { PersistentVaultStore.writeChromeIncognito(context, previous) }
+            .onFailure { error -> Log.e(TAG, "Could not roll back persistent Chrome Incognito setting", error) }
+        prefs.edit().putBoolean(KEY_BLOCK_CHROME_INCOGNITO, previous).apply()
+        tryApply(context)
+        return false
+    }
 
     fun setBlockAdultSites(context: Context, enabled: Boolean): WebProtectionUpdate {
         if (WebProtectionLockManager.isLocked(context, WebProtectionSetting.ADULT_SITES)) {
@@ -428,7 +463,7 @@ object WebProtectionManager {
         val domains = (knownDomains + customDomains + adultCustomDomains).toSortedSet()
         val patterns = domains.toSortedSet()
         val encoded = patterns.joinToString("\n")
-        val disableIncognito = blockAdultSites(context) || patterns.isNotEmpty()
+        val disableIncognito = blockChromeIncognito(context)
         if (!chromeInstalled) return !disableIncognito
         if (!force &&
             prefs.getString(KEY_APPLIED_CHROME_BLOCKLIST, null) == encoded &&
@@ -441,7 +476,10 @@ object WebProtectionManager {
                 putString("DnsOverHttpsMode", "off")
                 putBoolean("ForceGoogleSafeSearch", true)
             }
-            if (disableIncognito) putInt("IncognitoModeAvailability", CHROME_INCOGNITO_DISABLED)
+            putInt(
+                "IncognitoModeAvailability",
+                if (disableIncognito) CHROME_INCOGNITO_DISABLED else CHROME_INCOGNITO_ENABLED
+            )
         }
         val applied = try {
             dpm.setApplicationRestrictions(
@@ -453,11 +491,13 @@ object WebProtectionManager {
                 FortressAdminReceiver.getComponentName(context),
                 CHROME_PACKAGE
             )
-            val incognitoApplied = if (disableIncognito) {
-                savedRestrictions.getInt("IncognitoModeAvailability", -1) == CHROME_INCOGNITO_DISABLED
+            val expectedIncognito = if (disableIncognito) {
+                CHROME_INCOGNITO_DISABLED
             } else {
-                !savedRestrictions.containsKey("IncognitoModeAvailability")
+                CHROME_INCOGNITO_ENABLED
             }
+            val incognitoApplied =
+                savedRestrictions.getInt("IncognitoModeAvailability", -1) == expectedIncognito
             val blocklistApplied = if (patterns.isNotEmpty()) {
                 savedRestrictions.getStringArray("URLBlocklist")?.toSet() == patterns
             } else {

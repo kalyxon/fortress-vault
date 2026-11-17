@@ -8,6 +8,7 @@ import androidx.work.WorkerParameters
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.core.ControlManager
 import com.fortress.vault.core.WebProtectionLockManager
+import com.fortress.vault.core.AppTimeLimitManager
 
 class SentinelWorker(
     context: Context,
@@ -18,7 +19,8 @@ class SentinelWorker(
         WebProtectionLockManager.reconcileExpired(applicationContext)
         if (!VaultManager.isSealed(applicationContext) &&
             ControlManager.activeLocks(applicationContext).isEmpty() &&
-            WebProtectionLockManager.activeLocks(applicationContext).isEmpty()
+            WebProtectionLockManager.activeLocks(applicationContext).isEmpty() &&
+            !AppTimeLimitManager.hasActiveWork(applicationContext)
         ) {
             return Result.success()
         }

@@ -13,6 +13,7 @@ import com.fortress.vault.R
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.core.ControlManager
 import com.fortress.vault.core.WebProtectionLockManager
+import com.fortress.vault.core.AppTimeLimitManager
 import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +60,8 @@ class SentinelService : Service() {
                     // Fast in-memory check — reads cachedSeals / cachedLocks, no I/O
                     if (!VaultManager.isSealed(applicationContext) &&
                         ControlManager.activeLocks(applicationContext).isEmpty() &&
-                        WebProtectionLockManager.activeLocks(applicationContext).isEmpty()
+                        WebProtectionLockManager.activeLocks(applicationContext).isEmpty() &&
+                        !AppTimeLimitManager.hasActiveWork(applicationContext)
                     ) {
                         stopSelf()
                         break
@@ -71,6 +73,7 @@ class SentinelService : Service() {
                     // Runs on IO so it never touches the main thread.
                     withContext(Dispatchers.IO) {
                         ControlManager.enforceNewlyInstalledPackagesIfNeeded(applicationContext)
+                        AppTimeLimitManager.enforce(applicationContext)
                     }
 
                     // ── Trusted verification (every 15 min) ───────────────────────

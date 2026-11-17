@@ -2,6 +2,7 @@ package com.fortress.vault.core
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -14,13 +15,17 @@ object SentinelController {
 
     private const val WORK_NAME = "fortress_sentinel_periodic_work"
 
-    fun start(context: Context) {
+    fun start(context: Context): Boolean {
         val serviceIntent = Intent(context, SentinelService::class.java)
-        runCatching {
+        val serviceStarted = try {
             ContextCompat.startForegroundService(context, serviceIntent)
+            true
+        } catch (error: Exception) {
+            Log.e("SentinelController", "Could not start the enforcement service", error)
+            false
         }
 
-        runCatching {
+        try {
             val request = PeriodicWorkRequestBuilder<SentinelWorker>(15, TimeUnit.MINUTES)
                 .build()
 
@@ -29,7 +34,10 @@ object SentinelController {
                 ExistingPeriodicWorkPolicy.KEEP,
                 request
             )
+        } catch (error: Exception) {
+            Log.e("SentinelController", "Could not schedule periodic enforcement", error)
         }
+        return serviceStarted
     }
 
     fun stop(context: Context) {

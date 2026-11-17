@@ -11,6 +11,8 @@ object PersistentVaultStore {
     private const val KEY_SEALS_JSON = "p_seals_json"
     private const val KEY_WEB_PROTECTION_LOCKS = "p_web_protection_locks"
     private const val KEY_ADULT_DOMAIN_BLOCKS = "p_adult_domain_blocks"
+    private const val KEY_APP_TIME_LIMITS = "p_app_time_limits"
+    private const val KEY_CHROME_INCOGNITO = "p_chrome_incognito"
     private val restrictionsWriteLock = Any()
 
     fun write(context: Context, seals: List<Seal>) {
@@ -85,6 +87,55 @@ object PersistentVaultStore {
         val admin = FortressAdminReceiver.getComponentName(context)
         return dpm.getApplicationRestrictions(admin, context.packageName)
             .getString(KEY_ADULT_DOMAIN_BLOCKS)
+    }
+
+    fun writeAppTimeLimits(context: Context, json: String) {
+        writePersistentValue(context, KEY_APP_TIME_LIMITS, json)
+    }
+
+    fun readAppTimeLimits(context: Context): String? =
+        readPersistentValue(context, KEY_APP_TIME_LIMITS)
+
+    fun writeChromeIncognito(context: Context, enabled: Boolean) {
+        writePersistentValue(context, KEY_CHROME_INCOGNITO, enabled.toString())
+    }
+
+    fun readChromeIncognito(context: Context): Boolean? =
+        when (readPersistentValue(context, KEY_CHROME_INCOGNITO)) {
+            null -> null
+            "true" -> true
+            "false" -> false
+            else -> throw IllegalStateException("Saved Chrome Incognito setting is damaged.")
+        }
+
+    private fun writePersistentValue(context: Context, key: String, value: String) {
+        val dpm = deviceOwnerDpm(context)
+            ?: throw IllegalStateException("Fortress must be the device owner to persist protection settings.")
+        val admin = FortressAdminReceiver.getComponentName(context)
+        try {
+            synchronized(restrictionsWriteLock) {
+                val bundle = dpm.getApplicationRestrictions(admin, context.packageName)
+                bundle.putString(key, value)
+                dpm.setApplicationRestrictions(admin, context.packageName, bundle)
+                check(dpm.getApplicationRestrictions(admin, context.packageName).getString(key) == value) {
+                    "Android did not persist the protection setting."
+                }
+            }
+        } catch (error: Exception) {
+            Log.e("PersistentVaultStore", "Could not persist protection setting $key", error)
+            throw IllegalStateException("Could not safely persist this protection setting.", error)
+        }
+    }
+
+    private fun readPersistentValue(context: Context, key: String): String? {
+        val dpm = deviceOwnerDpm(context) ?: return null
+        val admin = FortressAdminReceiver.getComponentName(context)
+        return try {
+            dpm.getApplicationRestrictions(admin, context.packageName).getString(key)
+        } catch (error: Exception) {
+            Log.e("PersistentVaultStore", "Could not read persistent setting $key", error)
+            throw IllegalStateException("Could not safely read this protection setting.", error)
+        }
     }
 
     private fun deviceOwnerDpm(context: Context): DevicePolicyManager? {

@@ -1,20 +1,34 @@
 package com.fortress.vault.ui.screens
 
 import android.app.admin.DevicePolicyManager
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,10 +37,14 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.fortress.vault.core.ControlManager
+import com.fortress.vault.core.AppTimeLimitManager
+import com.fortress.vault.core.DailyAppLimit
 import com.fortress.vault.core.DeviceControl
 import com.fortress.vault.core.PreparedControls
 import com.fortress.vault.core.MAX_SEAL_DURATION_DAYS
@@ -59,13 +77,81 @@ private data class LoadedWebSettings(
     val blockAdultSites: Boolean,
     val blockBypassApps: Boolean,
     val blockSealedAppSites: Boolean,
+    val blockChromeIncognito: Boolean,
+    val appTimeLimitsEnabled: Boolean,
     val adultDomainBlockCount: Int,
     val webLocks: Map<WebProtectionSetting, WebProtectionLock>,
     val chromePolicyApplied: Boolean
 )
 
+private enum class SettingsSection(val title: String, val description: String, val icon: ImageVector) {
+    WEB_PROTECTION("Web protection", "Filters, browser access and Incognito", Icons.Filled.Shield),
+    APP_LIMITS("App time limits", "Daily allowances for selected apps", Icons.Filled.Timer),
+    DEVICE_CONTROLS("Device controls", "System settings and app changes", Icons.Filled.Tune)
+}
+
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
+    var section by remember { mutableStateOf<SettingsSection?>(null) }
+    BackHandler(enabled = section != null) { section = null }
+
+    AnimatedContent(
+        targetState = section,
+        transitionSpec = {
+            (fadeIn(tween(160)) + slideInHorizontally(tween(160)) { it / 24 }) togetherWith
+                (fadeOut(tween(110)) + slideOutHorizontally(tween(110)) { -it / 24 })
+        },
+        label = "settings-navigation"
+    ) { selectedSection ->
+        if (selectedSection == null) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                    Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(12.dp))
+                SettingsSection.entries.forEach { item ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { section = item }
+                            .padding(horizontal = 12.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(item.icon, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(22.dp))
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(item.description, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextSecondary)
+                    }
+                }
+            }
+        } else {
+            SettingsDetailScreen(section = selectedSection, onBack = { section = null })
+        }
+    }
+}
+
+@Composable
+private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -91,6 +177,16 @@ fun SettingsScreen(onBack: () -> Unit) {
     var blockAdultSites by remember { mutableStateOf(false) }
     var blockBypassApps by remember { mutableStateOf(false) }
     var blockSealedAppSites by remember { mutableStateOf(true) }
+    var blockChromeIncognito by remember { mutableStateOf(false) }
+    var appLimits by remember { mutableStateOf(emptyList<DailyAppLimit>()) }
+    var appTimeLimitsEnabled by remember { mutableStateOf(false) }
+    var usageAccessGranted by remember { mutableStateOf(false) }
+    var appTimeError by remember { mutableStateOf<String?>(null) }
+    var showAppPicker by remember { mutableStateOf(false) }
+    var limitEditorApp by remember { mutableStateOf<InstalledApp?>(null) }
+    var limitMinutesInput by remember { mutableStateOf("10") }
+    var appTimeUsage by remember { mutableStateOf(emptyMap<String, Long>()) }
+    var launchableApps by remember { mutableStateOf(emptyList<InstalledApp>()) }
     var webProtectionError by remember { mutableStateOf<String?>(null) }
     var webProtectionBusy by remember { mutableStateOf(false) }
     var isDeviceOwner by remember { mutableStateOf(false) }
@@ -116,6 +212,35 @@ fun SettingsScreen(onBack: () -> Unit) {
     var webDetailsTarget by remember { mutableStateOf<WebProtectionSetting?>(null) }
 
     LaunchedEffect(Unit) {
+        while (true) {
+            delay(5_000)
+            usageAccessGranted = withContext(Dispatchers.IO) {
+                AppTimeLimitManager.hasUsageAccess(context)
+            }
+        }
+    }
+
+    LaunchedEffect(appLimits) {
+        if (appLimits.isNotEmpty() && launchableApps.isEmpty()) {
+            launchableApps = withContext(Dispatchers.IO) { loadLaunchableApps(context) }
+        }
+        while (true) {
+            if (usageAccessGranted) {
+                appTimeUsage = withContext(Dispatchers.IO) {
+                    AppTimeLimitManager.usageMillisToday(
+                        context,
+                        appLimits.map { it.packageName }.toSet()
+                    )
+                }
+            }
+            appTimeError = withContext(Dispatchers.IO) {
+                AppTimeLimitManager.enforcementError(context)
+            }
+            delay(30_000)
+        }
+    }
+
+    LaunchedEffect(Unit) {
         try {
             val settings = withContext(Dispatchers.IO) {
                 WebProtectionLockManager.reconcileExpired(context)
@@ -132,6 +257,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                     blockAdultSites = adultSites,
                     blockBypassApps = WebProtectionManager.blockBypassApps(context),
                     blockSealedAppSites = WebProtectionManager.blockSealedAppSites(context),
+                    blockChromeIncognito = WebProtectionManager.blockChromeIncognito(context),
+                    appTimeLimitsEnabled = AppTimeLimitManager.isEnabled(context),
                     adultDomainBlockCount = WebProtectionManager.adultDomainBlockCount(context),
                     webLocks = WebProtectionLockManager.activeLocks(context),
                     chromePolicyApplied = policyApplied
@@ -141,9 +268,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             blockAdultSites = settings.blockAdultSites
             blockBypassApps = settings.blockBypassApps
             blockSealedAppSites = settings.blockSealedAppSites
+            blockChromeIncognito = settings.blockChromeIncognito
+            appTimeLimitsEnabled = settings.appTimeLimitsEnabled
             adultDomainBlockCount = settings.adultDomainBlockCount
             webLocks = settings.webLocks
             webLocksLoaded = true
+            appLimits = withContext(Dispatchers.IO) { AppTimeLimitManager.limits(context) }
+            usageAccessGranted = withContext(Dispatchers.IO) { AppTimeLimitManager.hasUsageAccess(context) }
+            appTimeError = withContext(Dispatchers.IO) { AppTimeLimitManager.enforcementError(context) }
             if (settings.isDeviceOwner && !settings.chromePolicyApplied) {
                 webProtectionError =
                     "Android did not confirm Chrome's website/Incognito policy. Restart Chrome; if Incognito is still available, check chrome://policy for IncognitoModeAvailability and URLBlocklist."
@@ -191,9 +323,23 @@ fun SettingsScreen(onBack: () -> Unit) {
                             (WebProtectionManager.setBlockBypassApps(context, enabled) to null)
                         WebProtectionSetting.SEALED_APP_WEBSITES ->
                             (WebProtectionManager.setBlockSealedAppSites(context, enabled) to null)
+                        WebProtectionSetting.CHROME_INCOGNITO ->
+                            (WebProtectionManager.setBlockChromeIncognito(context, enabled) to null)
+                        WebProtectionSetting.APP_TIME_LIMITS -> try {
+                            AppTimeLimitManager.setEnabled(context, enabled)
+                            true to null
+                        } catch (failure: Exception) {
+                            false to (failure.message ?: "Could not change daily app time limits.")
+                        }
                     }
+
                 }
                 if (!applied) {
+                    if (setting == WebProtectionSetting.APP_TIME_LIMITS) {
+                        appTimeLimitsEnabled = withContext(Dispatchers.IO) {
+                            AppTimeLimitManager.isEnabled(context)
+                        }
+                    }
                     webProtectionError = failureMessage ?: when (setting) {
                         WebProtectionSetting.ADULT_SITES ->
                             "Android could not apply the DNS policy. Check device-owner status and DNS connectivity."
@@ -201,12 +347,21 @@ fun SettingsScreen(onBack: () -> Unit) {
                             "Android could not restrict browsers or VPN setup. Check device-owner status."
                         WebProtectionSetting.SEALED_APP_WEBSITES ->
                             "Android could not apply Chrome's website policy. Check device-owner status and Chrome."
+                        WebProtectionSetting.CHROME_INCOGNITO ->
+                            "Android could not update Chrome's Incognito policy. Check device-owner status and Chrome."
+                        WebProtectionSetting.APP_TIME_LIMITS ->
+                            "Could not enable daily app time limits."
                     }
                 } else {
                     when (setting) {
                         WebProtectionSetting.ADULT_SITES -> blockAdultSites = enabled
                         WebProtectionSetting.CHROME_ONLY -> blockBypassApps = enabled
                         WebProtectionSetting.SEALED_APP_WEBSITES -> blockSealedAppSites = enabled
+                        WebProtectionSetting.CHROME_INCOGNITO -> blockChromeIncognito = enabled
+                        WebProtectionSetting.APP_TIME_LIMITS -> {
+                            appTimeLimitsEnabled = enabled
+                            appTimeError = null
+                        }
                     }
                 }
             } catch (failure: Exception) {
@@ -214,6 +369,26 @@ fun SettingsScreen(onBack: () -> Unit) {
             } finally {
                 webProtectionBusy = false
             }
+        }
+    }
+
+    fun saveAppLimit(packageName: String, minutes: Int?) {
+        scope.launch {
+            appTimeError = null
+            try {
+                withContext(Dispatchers.IO) {
+                    AppTimeLimitManager.setLimit(context, packageName, minutes)
+                }
+                appLimits = withContext(Dispatchers.IO) { AppTimeLimitManager.limits(context) }
+            } catch (failure: Exception) {
+                appTimeError = failure.message ?: "Could not save this app's daily limit."
+            }
+        }
+    }
+
+    LaunchedEffect(showAppPicker) {
+        if (showAppPicker) {
+            launchableApps = withContext(Dispatchers.IO) { loadLaunchableApps(context) }
         }
     }
 
@@ -353,72 +528,48 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(20.dp))
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = EmberRed.copy(alpha = 0.12f)),
-                    border = BorderStroke(1.dp, EmberRed.copy(alpha = 0.28f)),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("READY TO LOCK", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "${prepared.locks.size} device control${if (prepared.locks.size == 1) "" else "s"} selected",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary
-                        )
-                    }
-                }
+                Text("READY TO LOCK", style = MaterialTheme.typography.labelMedium, color = EmberRed)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "${prepared.locks.size} device control${if (prepared.locks.size == 1) "" else "s"} selected",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary
+                )
+                HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(top = 16.dp))
                 Spacer(Modifier.height(20.dp))
                 Text("Selected controls", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
                 prepared.locks.keys.forEachIndexed { index, control ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, VaultDivider),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("CONTROL ${"%02d".format(index + 1)}", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-                            Spacer(Modifier.height(6.dp))
-                            Text(control.title, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                if (control == DeviceControl.APP_INSTALLS) {
-                                    if (prepared.fullAppChangeBlock) {
-                                        "FULL BLOCK: new installs, app updates, and all user uninstalls are blocked."
-                                    } else {
-                                        "UPDATE-FRIENDLY: existing apps update normally; new apps are suspended and removed."
-                                    }
-                                } else {
-                                    control.effect()
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextSecondary
-                            )
-                        }
-                    }
+                    Text("CONTROL ${"%02d".format(index + 1)}", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                    Spacer(Modifier.height(4.dp))
+                    Text(control.title, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (control == DeviceControl.APP_INSTALLS) {
+                            if (prepared.fullAppChangeBlock) {
+                                "New installs, updates and uninstalls are blocked."
+                            } else {
+                                "Existing apps update normally; new apps are suspended and removed."
+                            }
+                        } else {
+                            control.effect()
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                    HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 12.dp))
                 }
-                Spacer(Modifier.height(4.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, VaultDivider),
-                    shape = RoundedCornerShape(14.dp)
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("LOCK DURATION", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-                            Spacer(Modifier.height(4.dp))
-                            Text("$days day(s)", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                        }
-                        Text("Timer protected", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                    Column {
+                        Text("LOCK DURATION", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                        Spacer(Modifier.height(4.dp))
+                        Text("$days day(s)", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                     }
+                    Text("Timer protected", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                 }
             }
             Button(
@@ -451,22 +602,13 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(20.dp))
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = SteelSurfaceHigh.copy(alpha = 0.55f)),
-                    border = BorderStroke(1.dp, VaultDivider),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Your recovery keys", style = MaterialTheme.typography.titleLarge)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Each control has a different key. Store both phrases somewhere private and offline.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
-                        )
-                    }
-                }
+                Text("Your recovery keys", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "Each control has a different key. Store both phrases offline.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+                HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(top = 12.dp))
                 Spacer(Modifier.height(20.dp))
                 prepared.phrases.entries.forEachIndexed { index, (control, value) ->
                     RecoveryPhraseCard(index + 1, control, value)
@@ -519,40 +661,30 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(20.dp))
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = SteelSurfaceHigh.copy(alpha = 0.55f)),
-                    border = BorderStroke(1.dp, VaultDivider),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Final check", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(6.dp))
+                Text("Final check", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${prepared.locks.size} control${if (prepared.locks.size == 1) "" else "s"} · $days day(s)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+                Spacer(Modifier.height(16.dp))
+                prepared.locks.keys.forEachIndexed { index, control ->
+                    if (index > 0) {
+                        HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 12.dp))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${prepared.locks.size} control${if (prepared.locks.size == 1) "" else "s"} will be locked for $days day(s).",
-                            style = MaterialTheme.typography.bodyMedium,
+                            "%02d".format(index + 1),
+                            style = MaterialTheme.typography.labelLarge,
                             color = TextSecondary
                         )
-                        Spacer(Modifier.height(16.dp))
-                        prepared.locks.keys.forEachIndexed { index, control ->
-                            if (index > 0) {
-                                HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 12.dp))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "%02d".format(index + 1),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = TextSecondary
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Text(control.title, style = MaterialTheme.typography.bodyLarge, color = TextPrimary)
-                            }
-                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(control.title, style = MaterialTheme.typography.bodyLarge, color = TextPrimary)
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+                HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 16.dp))
                 Text(
-                    "The selected controls stay active until the timer ends or their individual recovery phrase is entered.",
+                    "Controls stay active until the timer ends or a recovery phrase is entered.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary
                 )
@@ -596,13 +728,13 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
     } else {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(horizontal = 20.dp, vertical = 16.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Device controls", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            TextButton(onClick = onBack) {
-                Text("Back", style = MaterialTheme.typography.bodyMedium)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to settings")
             }
+            Text(section.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         }
-        if (!isDeviceOwner) {
+        if (!isDeviceOwner && section != SettingsSection.APP_LIMITS) {
             Text(
                 "Device controls and DNS filtering require Fortress Vault to be the device owner. Complete the one-time setup before enabling them.",
                 color = MaterialTheme.colorScheme.error,
@@ -610,7 +742,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 modifier = Modifier.padding(top = 8.dp)
             )
         }
-        controlError?.let {
+        if (section == SettingsSection.DEVICE_CONTROLS) controlError?.let {
             Text(
                 it,
                 color = MaterialTheme.colorScheme.error,
@@ -620,12 +752,10 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
         Spacer(Modifier.height(16.dp))
         LazyColumn(Modifier.weight(1f)) {
-            item {
-                Text("Web protection", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
+            if (section == SettingsSection.WEB_PROTECTION) item {
                 WebProtectionSettingCard(
                     title = WebProtectionSetting.ADULT_SITES.title,
-                    summary = "Device-wide adult-domain filter.",
+                    summary = "Device-wide domain filter",
                     checked = blockAdultSites,
                     locked = WebProtectionSetting.ADULT_SITES in webLocks,
                     unlockAtMillis = webLocks[WebProtectionSetting.ADULT_SITES]?.unlockAtMillis,
@@ -635,7 +765,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
                 WebProtectionSettingCard(
                     title = "Allow only Chrome and block VPN apps",
-                    summary = "Restrict browsers and VPN apps.",
+                    summary = "Restrict browsers and VPN apps",
                     checked = blockBypassApps,
                     locked = WebProtectionSetting.CHROME_ONLY in webLocks,
                     unlockAtMillis = webLocks[WebProtectionSetting.CHROME_ONLY]?.unlockAtMillis,
@@ -645,13 +775,23 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
                 WebProtectionSettingCard(
                     title = WebProtectionSetting.SEALED_APP_WEBSITES.title,
-                    summary = "Block sealed-app domains in Chrome.",
+                    summary = "Block sealed-app domains in Chrome",
                     checked = blockSealedAppSites,
                     locked = WebProtectionSetting.SEALED_APP_WEBSITES in webLocks,
                     unlockAtMillis = webLocks[WebProtectionSetting.SEALED_APP_WEBSITES]?.unlockAtMillis,
                     enabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
                     onCheckedChange = { changeWebSetting(WebProtectionSetting.SEALED_APP_WEBSITES, it) },
                     onOpenDetails = { webDetailsTarget = WebProtectionSetting.SEALED_APP_WEBSITES }
+                )
+                WebProtectionSettingCard(
+                    title = WebProtectionSetting.CHROME_INCOGNITO.title,
+                    summary = "Disable private browsing in Chrome",
+                    checked = blockChromeIncognito,
+                    locked = WebProtectionSetting.CHROME_INCOGNITO in webLocks,
+                    unlockAtMillis = webLocks[WebProtectionSetting.CHROME_INCOGNITO]?.unlockAtMillis,
+                    enabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
+                    onCheckedChange = { changeWebSetting(WebProtectionSetting.CHROME_INCOGNITO, it) },
+                    onOpenDetails = { webDetailsTarget = WebProtectionSetting.CHROME_INCOGNITO }
                 )
                 if (webProtectionBusy) {
                     Text("Applying changes…", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
@@ -662,15 +802,82 @@ fun SettingsScreen(onBack: () -> Unit) {
                 webLockError?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
-                Text(
-                    "Website rules apply in Chrome.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(top = 6.dp)
-                )
-                HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 16.dp))
+                HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 12.dp))
             }
-            items(DeviceControl.entries, key = { it.key }) { control ->
+            if (section == SettingsSection.APP_LIMITS) item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    WebProtectionSettingCard(
+                        title = WebProtectionSetting.APP_TIME_LIMITS.title,
+                        summary = "Daily allowances for selected apps",
+                        checked = appTimeLimitsEnabled,
+                        locked = WebProtectionSetting.APP_TIME_LIMITS in webLocks,
+                        unlockAtMillis = webLocks[WebProtectionSetting.APP_TIME_LIMITS]?.unlockAtMillis,
+                        enabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy &&
+                            (appTimeLimitsEnabled || appLimits.isNotEmpty()),
+                        onCheckedChange = { changeWebSetting(WebProtectionSetting.APP_TIME_LIMITS, it) },
+                        onOpenDetails = { webDetailsTarget = WebProtectionSetting.APP_TIME_LIMITS }
+                    )
+                    if (!usageAccessGranted) {
+                        Text(
+                            "Usage access is required.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        OutlinedButton(
+                            onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+                        ) { Text("Grant Usage access") }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("App allowances", style = MaterialTheme.typography.titleSmall)
+                        TextButton(
+                            enabled = !webProtectionBusy &&
+                                WebProtectionSetting.APP_TIME_LIMITS !in webLocks,
+                            onClick = { showAppPicker = true }
+                        ) { Text("Add app") }
+                    }
+                    appLimits.forEach { limit ->
+                        val appName = launchableApps.firstOrNull { it.packageName == limit.packageName }?.label
+                            ?: limit.packageName
+                        val usedMillis = appTimeUsage[limit.packageName] ?: 0L
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(appName, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "${(usedMillis / 60_000L).coerceAtMost(limit.limitMinutes.toLong())} / ${limit.limitMinutes} min today",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                            TextButton(
+                                enabled = WebProtectionSetting.APP_TIME_LIMITS !in webLocks,
+                                onClick = {
+                                    limitMinutesInput = limit.limitMinutes.toString()
+                                    limitEditorApp = InstalledApp(appName, limit.packageName)
+                                }
+                            ) { Text("Edit") }
+                            TextButton(
+                                enabled = WebProtectionSetting.APP_TIME_LIMITS !in webLocks,
+                                onClick = { saveAppLimit(limit.packageName, null) }
+                            ) { Text("Remove") }
+                        }
+                    }
+                    appTimeError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                    webProtectionError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            if (section == SettingsSection.DEVICE_CONTROLS) items(DeviceControl.entries, key = { it.key }) { control ->
                 val active = locks.firstOrNull { it.control == control }
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
@@ -709,37 +916,30 @@ fun SettingsScreen(onBack: () -> Unit) {
                     }
                 }
             }
-            item {
+            if (section == SettingsSection.DEVICE_CONTROLS) item {
                 Spacer(Modifier.height(12.dp))
                 if (DeviceControl.APP_INSTALLS in selected) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, VaultDivider),
-                        shape = RoundedCornerShape(14.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Full install block", style = MaterialTheme.typography.titleMedium)
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    "Also blocks app updates and prevents all installs and uninstalls.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = TextSecondary
-                                )
-                            }
-                            Switch(
-                                checked = fullAppChangeBlock,
-                                onCheckedChange = {
-                                    fullAppChangeBlock = it
-                                    if (it) days = days.coerceAtMost(MAX_FULL_APP_CHANGE_BLOCK_DAYS)
-                                }
+                        Column(Modifier.weight(1f)) {
+                            Text("Full install block", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Also blocks app updates and all installs and uninstalls.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
                             )
                         }
+                        Switch(
+                            checked = fullAppChangeBlock,
+                            onCheckedChange = {
+                                fullAppChangeBlock = it
+                                if (it) days = days.coerceAtMost(MAX_FULL_APP_CHANGE_BLOCK_DAYS)
+                            }
+                        )
                     }
+                    HorizontalDivider(color = VaultDivider)
                 }
                 if (DeviceControl.APP_INSTALLS in selected) {
                     Text(
@@ -803,6 +1003,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             WebProtectionSetting.ADULT_SITES -> blockAdultSites
             WebProtectionSetting.CHROME_ONLY -> blockBypassApps
             WebProtectionSetting.SEALED_APP_WEBSITES -> blockSealedAppSites
+            WebProtectionSetting.CHROME_INCOGNITO -> blockChromeIncognito
+            WebProtectionSetting.APP_TIME_LIMITS -> appTimeLimitsEnabled
         },
         locked = setting in webLocks,
         unlockAtMillis = webLocks[setting]?.unlockAtMillis,
@@ -1025,6 +1227,79 @@ fun SettingsScreen(onBack: () -> Unit) {
         )
     }
 
+    if (showAppPicker) {
+        AlertDialog(
+            onDismissRequest = { showAppPicker = false },
+            title = { Text("Choose an app") },
+            text = {
+                val candidates = launchableApps.filter { app ->
+                    app.packageName != context.packageName &&
+                        appLimits.none { it.packageName == app.packageName } &&
+                        app.packageName !in VaultManager.blockedPackages(context) &&
+                        app.packageName !in ControlManager.newlyBlockedPackages(context)
+                }
+                if (candidates.isEmpty()) {
+                    Text("No eligible apps are available to add.")
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 440.dp)) {
+                        items(candidates, key = { it.packageName }) { app ->
+                            TextButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    showAppPicker = false
+                                    limitMinutesInput = "10"
+                                    limitEditorApp = app
+                                }
+                            ) {
+                                Text(app.label, modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAppPicker = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    limitEditorApp?.let { app ->
+        AlertDialog(
+            onDismissRequest = { limitEditorApp = null },
+            title = { Text("Daily limit for ${app.label}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("The app will be suspended when it reaches this much foreground use today.")
+                    OutlinedTextField(
+                        value = limitMinutesInput,
+                        onValueChange = { value ->
+                            if (value.all(Char::isDigit)) limitMinutesInput = value
+                        },
+                        label = { Text("Minutes per day (1–1440)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
+                    appTimeError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = limitMinutesInput.toIntOrNull() in 1..(24 * 60),
+                    onClick = {
+                        val minutes = limitMinutesInput.toInt()
+                        saveAppLimit(app.packageName, minutes)
+                        limitEditorApp = null
+                    }
+                ) { Text("Save limit") }
+            },
+            dismissButton = {
+                TextButton(onClick = { limitEditorApp = null }) { Text("Cancel") }
+            }
+        )
+    }
+
     preparedWebLock?.let { webLock ->
         val clipboard = LocalClipboardManager.current
         AlertDialog(
@@ -1192,47 +1467,33 @@ private fun WebProtectionSettingCard(
     onCheckedChange: (Boolean) -> Unit,
     onOpenDetails: () -> Unit
 ) {
-    Card(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 5.dp)
             .clickable(onClick = onOpenDetails),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, if (locked) BrassPrimary.copy(alpha = 0.6f) else VaultDivider),
-        shape = RoundedCornerShape(14.dp)
     ) {
-        Column(Modifier.fillMaxWidth().padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                Text(summary, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                if (locked) {
                     Text(
-                        title,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(summary, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                }
-                Switch(
-                    checked = checked,
-                    enabled = enabled && !locked,
-                    onCheckedChange = onCheckedChange
-                )
-                IconButton(onClick = onOpenDetails) {
-                    Icon(
-                        imageVector = Icons.Filled.ChevronRight,
-                        contentDescription = "Protection details",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        expiryLabel(unlockAtMillis),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = BrassPrimary
                     )
                 }
             }
-            if (locked) {
-                Text(
-                    expiryLabel(unlockAtMillis),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = BrassPrimary,
-                    modifier = Modifier.padding(top = 6.dp)
-                )
-            }
+            Switch(
+                checked = checked,
+                enabled = enabled && !locked,
+                onCheckedChange = onCheckedChange
+            )
         }
+        HorizontalDivider(color = VaultDivider)
     }
 }
 
@@ -1266,6 +1527,16 @@ private fun WebProtectionDetailsDialog(
             description = "Blocks known websites for sealed apps in managed Google Chrome, including any custom domains saved to a seal.",
             scope = "Managed Google Chrome only",
             note = "Other browsers are unaffected. Saved custom seal domains remain blocked until their seal ends."
+        )
+        WebProtectionSetting.CHROME_INCOGNITO -> WebProtectionDetails(
+            description = "Controls private browsing in managed Google Chrome independently from website filtering.",
+            scope = "Managed Google Chrome only",
+            note = "When off, this setting explicitly allows Incognito even if other web protections are enabled. Chrome must be installed and Fortress Vault must be the device owner."
+        )
+        WebProtectionSetting.APP_TIME_LIMITS -> WebProtectionDetails(
+            description = "Suspends each selected app when Android reports that it has reached its daily foreground-use allowance.",
+            scope = "Selected apps · resets at local midnight",
+            note = "Requires Android Usage access and device-owner status. The app remains suspended until the next local day."
         )
     }
 
@@ -1315,90 +1586,46 @@ private fun WebProtectionDetailsDialog(
                         .padding(top = 12.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(24.dp),
-                        border = BorderStroke(1.dp, VaultDivider)
-                    ) {
-                        Column(Modifier.padding(20.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .background(BrassPrimary.copy(alpha = 0.12f), RoundedCornerShape(14.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Shield,
-                                        contentDescription = null,
-                                        tint = BrassPrimary,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                                Spacer(Modifier.width(14.dp))
-                                Column {
-                                    Text(
-                                        if (enabled) "Protection is on" else "Protection is off",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        details.scope,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = BrassPrimary,
-                                        modifier = Modifier.padding(top = 3.dp)
-                                    )
-                                }
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Shield, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    if (enabled) "Protection is on" else "Protection is off",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(details.scope, style = MaterialTheme.typography.bodySmall, color = BrassPrimary)
                             }
-                            Spacer(Modifier.height(18.dp))
-                            Text(
-                                details.description,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
                         }
+                        Text(
+                            details.description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 10.dp)
+                        )
+                        HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(top = 14.dp))
                     }
 
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(18.dp),
-                        border = BorderStroke(1.dp, VaultDivider)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "Protection",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    if (locked) "Locked with a recovery key" else "Turn this protection on or off",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary
-                                )
-                            }
-                            Switch(
-                                checked = enabled,
-                                enabled = controlsEnabled && !locked,
-                                onCheckedChange = onToggle
-                            )
+                        Column(Modifier.weight(1f)) {
+                            Text("Enabled", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                            if (locked) Text("Recovery locked", style = MaterialTheme.typography.bodySmall, color = BrassPrimary)
                         }
+                        Switch(
+                            checked = enabled,
+                            enabled = controlsEnabled && !locked,
+                            onCheckedChange = onToggle
+                        )
                     }
 
                     if (setting == WebProtectionSetting.ADULT_SITES) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = RoundedCornerShape(18.dp),
-                            border = BorderStroke(1.dp, VaultDivider)
-                        ) {
-                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Column(Modifier.fillMaxWidth()) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1437,23 +1664,17 @@ private fun WebProtectionDetailsDialog(
                                         }
                                     }
                                 }
-                                HorizontalDivider(color = VaultDivider)
+                                HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 10.dp))
                                 Text(
-                                    "Custom blocks apply in Google Chrome only while this protection is on.",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    "Custom blocks apply in Chrome while protection is on.",
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary
                                 )
-                            }
                         }
                     }
 
                     if (locked) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(18.dp)
-                        ) {
-                            Column(Modifier.padding(18.dp)) {
+                        Column(Modifier.fillMaxWidth()) {
                                 Text(
                                     "RECOVERY LOCK",
                                     style = MaterialTheme.typography.labelLarge,
@@ -1478,7 +1699,7 @@ private fun WebProtectionDetailsDialog(
                                 ) {
                                     Text("Unlock with recovery phrase")
                                 }
-                            }
+                            HorizontalDivider(color = VaultDivider)
                         }
                     } else {
                         OutlinedButton(
@@ -1490,31 +1711,19 @@ private fun WebProtectionDetailsDialog(
                         }
                     }
 
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Text(
-                            details.note,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary,
-                            modifier = Modifier.padding(16.dp)
-                        )
-                    }
+                    Text(details.note, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                 }
 
-                Surface(color = MaterialTheme.colorScheme.background, shadowElevation = 12.dp) {
-                    Button(
-                        onClick = onDismiss,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = BrassPrimary,
-                            contentColor = MaterialTheme.colorScheme.background
-                        )
-                    ) {
-                        Text("Done")
-                    }
+                HorizontalDivider(color = VaultDivider)
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BrassPrimary,
+                        contentColor = MaterialTheme.colorScheme.background
+                    )
+                ) {
+                    Text("Done")
                 }
             }
         }
@@ -1540,13 +1749,7 @@ private fun expiryLabel(unlockAtMillis: Long?): String {
 @Composable
 private fun RecoveryPhraseCard(index: Int, control: DeviceControl, phrase: String) {
     val clipboard = LocalClipboardManager.current
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, VaultDivider),
-        shape = RoundedCornerShape(14.dp)
-    ) {
-        Column(Modifier.padding(16.dp)) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "%02d".format(index),
@@ -1560,18 +1763,12 @@ private fun RecoveryPhraseCard(index: Int, control: DeviceControl, phrase: Strin
                 }
             }
             Spacer(Modifier.height(14.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SteelSurfaceHigh, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 14.dp, vertical = 16.dp)
-            ) {
-                Text(
-                    phrase,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-                    color = BrassPrimary
-                )
-            }
+            Text(
+                phrase,
+                style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                color = BrassPrimary,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
             Spacer(Modifier.height(4.dp))
             TextButton(
                 onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(phrase)) },
@@ -1579,7 +1776,7 @@ private fun RecoveryPhraseCard(index: Int, control: DeviceControl, phrase: Strin
             ) {
                 Text("Copy phrase", color = TextPrimary)
             }
-        }
+        HorizontalDivider(color = VaultDivider)
     }
 }
 

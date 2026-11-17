@@ -12,6 +12,7 @@ import com.fortress.vault.core.SentinelController
 import com.fortress.vault.core.ControlManager
 import com.fortress.vault.core.WebProtectionManager
 import com.fortress.vault.core.WebProtectionLockManager
+import com.fortress.vault.core.AppTimeLimitManager
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
@@ -39,7 +40,8 @@ class FortressApplication : Application(), Configuration.Provider {
             VaultManager.enforceDeviceOwnerRestrictions(this@FortressApplication)
             if (seals.isNotEmpty() ||
                 ControlManager.activeLocks(this@FortressApplication).isNotEmpty() ||
-                WebProtectionLockManager.activeLocks(this@FortressApplication).isNotEmpty()
+                WebProtectionLockManager.activeLocks(this@FortressApplication).isNotEmpty() ||
+                AppTimeLimitManager.hasActiveWork(this@FortressApplication)
             ) {
                 PackageFreezer.freezeAll(this@FortressApplication, seals.flatMap { it.packages }.toSet())
                 runCatching { SentinelController.start(this@FortressApplication) }

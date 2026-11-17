@@ -10,6 +10,7 @@ import com.fortress.vault.core.VaultManager
 import com.fortress.vault.core.ControlManager
 import com.fortress.vault.core.WebProtectionManager
 import com.fortress.vault.core.WebProtectionLockManager
+import com.fortress.vault.core.AppTimeLimitManager
 import com.fortress.vault.service.SentinelService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +25,8 @@ class BootReceiver : BroadcastReceiver() {
         WebProtectionManager.apply(context, force = true)
         if (!VaultManager.isSealed(context) &&
             ControlManager.activeLocks(context).isEmpty() &&
-            WebProtectionLockManager.activeLocks(context).isEmpty()
+            WebProtectionLockManager.activeLocks(context).isEmpty() &&
+            !AppTimeLimitManager.hasActiveWork(context)
         ) return
         ControlManager.apply(context)
         val seals = PersistentVaultStore.read(context) ?: VaultManager.activeSeals(context)
