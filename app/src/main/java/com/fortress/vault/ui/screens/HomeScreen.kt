@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +27,10 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.foundation.shape.CircleShape
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,6 +50,12 @@ import com.fortress.vault.core.VaultManager
 import com.fortress.vault.ui.theme.BrassPrimary
 import com.fortress.vault.ui.theme.CountdownStyle
 import com.fortress.vault.ui.theme.EmberRed
+import com.fortress.vault.ui.components.PageHeader
+import com.fortress.vault.ui.components.SectionLabel
+import com.fortress.vault.ui.components.SettingsCard
+import com.fortress.vault.ui.components.SettingsRow
+import com.fortress.vault.ui.theme.TextPrimary
+import com.fortress.vault.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -82,7 +93,26 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
     }
 
     val detailsSeal = seals.firstOrNull { it.id == detailsSealId }
-    BackHandler(enabled = detailsSeal != null) { detailsSealId = null }
+    BackHandler(
+        enabled = detailsSeal != null ||
+            websiteRulesTargetSealId != null ||
+            addAppsTargetSealId != null ||
+            pendingAddedApps != null ||
+            extendTargetSealId != null ||
+            pendingExtension != null
+    ) {
+        when {
+            pendingExtension != null -> pendingExtension = null
+            extendTargetSealId != null -> extendTargetSealId = null
+            pendingAddedApps != null -> pendingAddedApps = null
+            addAppsTargetSealId != null -> addAppsTargetSealId = null
+            websiteRulesTargetSealId != null -> {
+                detailsSealId = websiteRulesTargetSealId
+                websiteRulesTargetSealId = null
+            }
+            detailsSeal != null -> detailsSealId = null
+        }
+    }
 
     if (detailsSeal != null) {
         SealDetailsScreen(
@@ -90,6 +120,8 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
             context = context,
             onDismiss = { detailsSealId = null },
             onAddApps = { addAppsTargetSealId = detailsSeal.id },
+            onExtend = { extendTargetSealId = detailsSeal.id },
+            onEmergencyUnlock = { onEmergencyUnlock(detailsSeal.id) },
             onEditWebsites = {
                 websiteRulesTargetSealId = detailsSeal.id
                 detailsSealId = null
@@ -99,27 +131,15 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Filled.Shield, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(22.dp))
+                Box(Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp)) {
+                    PageHeader(
+                        title = "Fortress Vault",
+                        action = {
+                            IconButton(onClick = onSettings) {
+                                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Text("Fortress Vault", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    }
-                    IconButton(onClick = onSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    )
                 }
             },
             floatingActionButton = {
@@ -160,21 +180,13 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
                     contentPadding = PaddingValues(top = 20.dp, bottom = 96.dp)
                 ) {
                     item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Active seals", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.width(8.dp))
-                        }
+                        SectionLabel("Active seals")
                     }
-                    items(seals, key = { it.id }) { seal ->
+                    itemsIndexed(seals, key = { _, seal -> seal.id }) { _, seal ->
                         SealCard(
                             seal = seal,
                             tick = tick,
-                            onTap = { detailsSealId = seal.id },
-                            onExtend = { extendTargetSealId = seal.id },
-                            onEmergencyUnlock = { onEmergencyUnlock(seal.id) }
+                            onTap = { detailsSealId = seal.id }
                         )
                     }
                 }
@@ -186,8 +198,8 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
     if (extendTarget != null) {
         ExtendSealDialog(
             onDismiss = { extendTargetSealId = null },
-            onConfirm = { extraDays ->
-                pendingExtension = extendTarget to extraDays
+            onConfirm = { extraHours ->
+                pendingExtension = extendTarget to extraHours
                 extendTargetSealId = null
             }
         )
@@ -199,11 +211,11 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
         if (seal != null) {
             ExtendSealConfirmationDialog(
                 seal = seal,
-                extraDays = extension.second,
+                extraHours = extension.second,
                 onDismiss = { pendingExtension = null },
                 onConfirm = {
                     coroutineScope.launch {
-                        VaultManager.extendSeal(context, seal.id, extension.second)
+                        VaultManager.extendSealByHours(context, seal.id, extension.second)
                         seals = VaultManager.activeSeals(context)
                     }
                     pendingExtension = null
@@ -292,7 +304,11 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
 }
 
 @Composable
-private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> Unit, onEmergencyUnlock: () -> Unit) {
+private fun SealCard(
+    seal: Seal,
+    tick: Long,
+    onTap: () -> Unit
+) {
     val context = LocalContext.current
     // Recompute label when tick changes — driven by single shared 30s loop in HomeScreen,
     // not per-card. This eliminates N parallel LaunchedEffect loops for N seal cards.
@@ -300,16 +316,31 @@ private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> 
         VaultManager.remainingLabelFor(context, seal)
     }
 
-    Surface(
+    SettingsCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
-            .clickable(onClick = onTap),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp
+            .padding(vertical = 6.dp)
+            .clickable(onClick = onTap)
     ) {
-        Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "SEAL",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary
+                )
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(Modifier.height(12.dp))
             AnimatedContent(
                 targetState = remainingLabel,
                 transitionSpec = {
@@ -317,12 +348,65 @@ private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> 
                 },
                 label = "seal-countdown"
             ) { label ->
-                Text(label, style = CountdownStyle.copy(fontSize = 32.sp, letterSpacing = 0.25.sp), color = BrassPrimary)
+                val parts = label.split(" ")
+                Row(verticalAlignment = Alignment.Bottom) {
+                    if (parts.size >= 2 && parts[0].endsWith("d") && parts[1].endsWith("h")) {
+                        Text(
+                            parts[0].removeSuffix("d"),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                        Text(
+                            "d",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp, end = 12.dp)
+                        )
+                        Text(
+                            parts[1].removeSuffix("h").removeSuffix("m"),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                        Text(
+                            if (parts[1].endsWith("h")) "h" else "m",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp)
+                        )
+                    } else if (parts.size >= 2 && parts[0].endsWith("h") && parts[1].endsWith("m")) {
+                        Text(
+                            parts[0].removeSuffix("h"),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                        Text(
+                            "h",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp, end = 12.dp)
+                        )
+                        Text(
+                            parts[1].removeSuffix("m"),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                        Text(
+                            "m",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp)
+                        )
+                    } else {
+                        Text(
+                            parts.firstOrNull().orEmpty(),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                    }
+                }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
                 Text(
                     "${seal.packages.size} protected app${if (seal.packages.size == 1) "" else "s"}",
                     style = MaterialTheme.typography.bodyMedium,
@@ -330,18 +414,6 @@ private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> 
                 )
                 Spacer(Modifier.weight(1f))
                 Icon(Icons.Filled.ChevronRight, contentDescription = "Seal details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(12.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                TextButton(onClick = onExtend) { Text("Add time") }
-                TextButton(
-                    onClick = onEmergencyUnlock,
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text("Emergency unlock") }
             }
         }
     }
@@ -355,6 +427,8 @@ private fun SealDetailsScreen(
     context: android.content.Context,
     onDismiss: () -> Unit,
     onAddApps: () -> Unit,
+    onExtend: () -> Unit,
+    onEmergencyUnlock: () -> Unit,
     onEditWebsites: () -> Unit
 ) {
     val uniquePackages = remember(seal) { seal.packages.toList().distinct() }
@@ -388,26 +462,32 @@ private fun SealDetailsScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to seals")
                 }
-                Text("Seal details", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Column {
+                    Text("Seal", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                    Text(sealShortId(seal.id), style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                }
             }
         },
         bottomBar = {
-            Column {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
-                Button(
-                    onClick = onAddApps,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary, contentColor = MaterialTheme.colorScheme.background)
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Add apps")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                IconButton(onClick = onAddApps) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add apps")
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onExtend) {
+                    Icon(Icons.Filled.Timer, contentDescription = "Add time")
+                }
+                IconButton(onClick = onEmergencyUnlock) {
+                    Icon(Icons.Filled.LockOpen, contentDescription = "Emergency unlock", tint = EmberRed)
                 }
             }
         },
@@ -434,7 +514,7 @@ private fun SealDetailsScreen(
                             },
                             label = "detail-countdown"
                         ) { label ->
-                            Text(label, style = CountdownStyle.copy(fontSize = 38.sp, letterSpacing = 0.25.sp), color = BrassPrimary)
+                            Text(label, style = CountdownStyle.copy(fontSize = 38.sp, letterSpacing = 0.sp), color = TextPrimary)
                         }
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -531,6 +611,7 @@ private fun WebsiteDomainsDialog(
     var domains by remember(seal.id) { mutableStateOf(seal.websiteDomains) }
     var saving by remember(seal.id) { mutableStateOf(false) }
     var errorMessage by remember(seal.id) { mutableStateOf<String?>(null) }
+    BackHandler(enabled = true) { if (!saving) onDismiss() }
     val apps by produceState<List<PackageEntry>>(initialValue = emptyList(), seal.id) {
         value = withContext(Dispatchers.IO) {
             seal.packages.map { packageName ->
@@ -543,40 +624,30 @@ private fun WebsiteDomainsDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = { if (!saving) onDismiss() },
-        title = { Text("Websites for this seal") },
-        text = {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+            PageHeader(title = "Website rules", onBack = { if (!saving) onDismiss() })
             Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())
+                Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    "Add domains to block in managed Chrome for each sealed app. Once saved, a domain cannot be removed until this seal ends.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
                 if (apps.isEmpty()) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.CenterHorizontally).size(24.dp),
-                        color = BrassPrimary
-                    )
+                    Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = BrassPrimary, strokeWidth = 2.dp)
+                    }
                 } else {
                     WebsiteDomainsEditor(
                         apps = apps.map { it.packageName to it.label },
                         websiteDomains = domains,
-                        allowRemove = false,
+                        allowRemove = true,
                         onDomainsChanged = { domains = it }
                     )
                 }
                 errorMessage?.let {
-                    Spacer(Modifier.height(8.dp))
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
+            Button(
                 enabled = apps.isNotEmpty() && !saving,
                 onClick = {
                     saving = true
@@ -585,15 +656,14 @@ private fun WebsiteDomainsDialog(
                         saving = false
                         if (error == null) onDismiss() else errorMessage = error
                     }
-                }
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
             ) {
-                Text(if (saving) "Applying..." else "Save websites", color = BrassPrimary)
+                Text(if (saving) "Applying..." else "Save websites", color = MaterialTheme.colorScheme.background)
             }
-        },
-        dismissButton = {
-            TextButton(enabled = !saving, onClick = onDismiss) { Text("Cancel") }
         }
-    )
+    }
 }
 
 @Composable
@@ -612,6 +682,7 @@ private fun AddAppsToSealDialog(
     }
     val candidates = remember(allApps, existingPackages) { allApps.filter { it.packageName !in existingPackages } }
     val selected = remember { mutableStateOf(setOf<String>()) }
+    BackHandler(enabled = true) { onDismiss() }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -678,6 +749,7 @@ private fun AddAppsConfirmationDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
+    BackHandler(enabled = true) { onDismiss() }
     // Load labels asynchronously — previously done synchronously on composition thread
     val labels by produceState<List<String>>(initialValue = emptyList(), packageNames) {
         value = withContext(Dispatchers.IO) {
@@ -732,72 +804,132 @@ private fun AddAppsConfirmationDialog(
 
 @Composable
 private fun ExtendSealDialog(onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
-    var extraDays by remember { mutableStateOf(7) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add time to this seal") },
-        text = {
-            Column {
-                Text("+$extraDays days", style = MaterialTheme.typography.headlineMedium, color = BrassPrimary)
-                Slider(
-                    value = extraDays.toFloat(),
-                    onValueChange = { extraDays = it.toInt() },
-                    valueRange = MIN_SEAL_DURATION_DAYS.toFloat()..MAX_SEAL_DURATION_DAYS.toFloat(),
-                    colors = SliderDefaults.colors(thumbColor = BrassPrimary, activeTrackColor = BrassPrimary)
-                )
-                Text(
-                    "This only extends the countdown — the seal can't be shortened, only lengthened.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+    var mode by remember { mutableStateOf(AddTimeMode.HOURS) }
+    BackHandler(enabled = true) { onDismiss() }
+    var extraHours by remember { mutableIntStateOf(24) }
+    var extraDays by remember { mutableIntStateOf(1) }
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+            PageHeader(title = "Add time", onBack = onDismiss)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = mode == AddTimeMode.HOURS,
+                        onClick = { mode = AddTimeMode.HOURS },
+                        label = { Text("Hours") }
+                    )
+                    FilterChip(
+                        selected = mode == AddTimeMode.DAYS,
+                        onClick = { mode = AddTimeMode.DAYS },
+                        label = { Text("Days") }
+                    )
+                }
+                SettingsCard {
+                    Column(Modifier.padding(20.dp)) {
+                        Text(
+                            "+" + if (mode == AddTimeMode.HOURS) formatDuration(extraHours)
+                            else formatDuration(extraDays * 24),
+                            style = MaterialTheme.typography.displaySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(20.dp))
+                        if (mode == AddTimeMode.HOURS) {
+                            Slider(
+                                value = extraHours.toFloat(),
+                                onValueChange = { extraHours = it.toInt().coerceIn(1, 24) },
+                                valueRange = 1f..24f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = BrassPrimary,
+                                    activeTrackColor = BrassPrimary
+                                )
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("1 hour", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("24 hours", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        } else {
+                            Slider(
+                                value = extraDays.toFloat(),
+                                onValueChange = { extraDays = it.toInt().coerceIn(1, 365) },
+                                valueRange = 1f..365f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = BrassPrimary,
+                                    activeTrackColor = BrassPrimary
+                                )
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("1 day", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("365 days", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(extraDays) }) { Text("Add time", color = BrassPrimary) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            Button(
+                onClick = {
+                    onConfirm(if (mode == AddTimeMode.HOURS) extraHours else extraDays * 24)
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
+            ) {
+                Text("Continue", color = MaterialTheme.colorScheme.background)
+            }
         }
-    )
+    }
 }
 
 @Composable
 private fun ExtendSealConfirmationDialog(
     seal: Seal,
-    extraDays: Int,
+    extraHours: Int,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    val newUnlockAt = seal.unlockAtMillis + TimeUnit.DAYS.toMillis(extraDays.toLong())
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Confirm added time") },
-        text = {
-            Column {
-                Text("Add $extraDays day${if (extraDays == 1) "" else "s"} to this seal?")
-                Spacer(Modifier.height(12.dp))
-                Text("Current unlock date: ${formatSealDate(seal.unlockAtMillis)}")
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "New unlock date: ${formatSealDate(newUnlockAt)}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = BrassPrimary
-                )
+    val newUnlockAt = seal.unlockAtMillis + TimeUnit.HOURS.toMillis(extraHours.toLong())
+    BackHandler(enabled = true) { onDismiss() }
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+            PageHeader(title = "Confirm added time", onBack = onDismiss)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsCard {
+                    Column(Modifier.padding(18.dp)) {
+                        Text("Current unlock", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(formatSealDate(seal.unlockAtMillis), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                SettingsCard {
+                    Column(Modifier.padding(18.dp)) {
+                        Text("New unlock", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(formatSealDate(newUnlockAt), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Confirm added time", color = BrassPrimary) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Back") }
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
+            ) {
+                Text("Confirm added time", color = MaterialTheme.colorScheme.background)
+            }
         }
-    )
+    }
 }
 
 private fun formatSealDate(epochMillis: Long): String =
     SimpleDateFormat("d MMM · HH:mm", Locale.getDefault()).format(Date(epochMillis))
+
+private fun sealShortId(sealId: String): String =
+    "ID " + sealId.replace("-", "").take(8).uppercase(Locale.getDefault())
+
+private fun formatDuration(totalHours: Int): String {
+    if (totalHours < 24) return "$totalHours hour${if (totalHours == 1) "" else "s"}"
+    val days = totalHours / 24
+    val hours = totalHours % 24
+    return if (hours == 0) "$days day${if (days == 1) "" else "s"}"
+    else "$days d $hours h"
+}
+
+private enum class AddTimeMode { HOURS, DAYS }
 
 private fun String.toAppDisplayName(): String {
     val ignoredSegments = setOf("android", "app", "mobile", "client", "lite")
