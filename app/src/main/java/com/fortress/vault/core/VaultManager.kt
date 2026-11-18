@@ -253,16 +253,23 @@ object VaultManager {
     }
 
     suspend fun extendSeal(context: Context, sealId: String, extraDays: Int) {
+        extendSealByHours(context, sealId, extraDays * 24)
+    }
+
+    suspend fun extendSealByHours(context: Context, sealId: String, extraHours: Int) {
         init(context)
-        require(extraDays in MIN_SEAL_DURATION_DAYS..MAX_SEAL_DURATION_DAYS) {
-            "Added time must be between $MIN_SEAL_DURATION_DAYS and $MAX_SEAL_DURATION_DAYS days."
+        require(extraHours in MIN_SEAL_DURATION_HOURS..MAX_SEAL_DURATION_HOURS) {
+            "Added time must be between $MIN_SEAL_DURATION_HOURS hour and $MAX_SEAL_DURATION_DAYS days."
         }
 
         val networkTime = TimeKeeper.fetchTrustedTimeMillis(context)
         synchronized(lock) {
             val seals = activeSeals(context)
             val target = seals.firstOrNull { it.id == sealId } ?: return
-            val updated = target.copy(unlockAtMillis = target.unlockAtMillis + TimeUnit.DAYS.toMillis(extraDays.toLong()), lastKnownGoodMillis = networkTime)
+            val updated = target.copy(
+                unlockAtMillis = target.unlockAtMillis + TimeUnit.HOURS.toMillis(extraHours.toLong()),
+                lastKnownGoodMillis = networkTime
+            )
             saveSeals(context, seals.map { if (it.id == sealId) updated else it })
         }
     }
