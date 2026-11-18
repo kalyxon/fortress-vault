@@ -113,7 +113,7 @@ To build a release APK locally:
 The signed release APK will be generated at:
 `app/build/outputs/apk/release/app-release.apk`
 
-Automated releases are built via **GitHub Actions** (`.github/workflows/release.yml`) whenever a release tag (e.g. `v1.2.0`) is pushed to the repository.
+Automated releases are built via **GitHub Actions** (`.github/workflows/release.yml`) whenever a release tag (e.g. `v1.2.1`) is pushed to the repository.
 
 ### Developer Manual Installation
 
