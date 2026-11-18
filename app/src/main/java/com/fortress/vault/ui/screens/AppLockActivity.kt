@@ -11,6 +11,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.fortress.vault.ui.components.PageHeader
+import com.fortress.vault.ui.components.SettingsCard
 import com.fortress.vault.core.VaultManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -52,11 +54,18 @@ private fun AppLockScreen(packageName: String, onDone: (Boolean) -> Unit) {
         Column(modifier = Modifier
             .fillMaxSize()
             .padding(24.dp), verticalArrangement = Arrangement.Center) {
-            Text("Restricted app", style = MaterialTheme.typography.headlineSmall)
+            PageHeader(title = "Restricted app")
             Spacer(Modifier.height(8.dp))
             Text("Enter the emergency phrase to temporarily open $packageName.")
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(value = phrase, onValueChange = { phrase = it }, label = { Text("Emergency phrase") }, modifier = Modifier.fillMaxWidth())
+            SettingsCard {
+                OutlinedTextField(
+                    value = phrase,
+                    onValueChange = { phrase = it },
+                    label = { Text("Emergency phrase") },
+                    modifier = Modifier.fillMaxWidth().padding(16.dp)
+                )
+            }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Spacer(Modifier.height(12.dp))
             Row {
