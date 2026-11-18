@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,7 +29,11 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -66,6 +71,8 @@ import com.fortress.vault.ui.theme.SteelSurfaceHigh
 import com.fortress.vault.ui.theme.TextPrimary
 import com.fortress.vault.ui.theme.TextSecondary
 import com.fortress.vault.ui.theme.VaultDivider
+import com.fortress.vault.ui.components.SettingsCard
+import com.fortress.vault.ui.components.PageHeader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -108,44 +115,90 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                    Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 }
-                Spacer(Modifier.height(12.dp))
-                SettingsSection.entries.forEach { item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(18.dp))
-                            .clickable { section = item }
-                            .padding(horizontal = 12.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(item.icon, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(22.dp))
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Text(item.description, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                        }
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextSecondary)
-                    }
-                }
+                Spacer(Modifier.height(18.dp))
+                SettingsGroupCard(
+                    items = listOf(SettingsSection.WEB_PROTECTION, SettingsSection.APP_LIMITS),
+                    onSelect = { section = it }
+                )
+                Spacer(Modifier.height(16.dp))
+                SettingsGroupCard(
+                    items = listOf(SettingsSection.DEVICE_CONTROLS),
+                    onSelect = { section = it }
+                )
             }
         } else {
             SettingsDetailScreen(section = selectedSection, onBack = { section = null })
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroupCard(
+    items: List<SettingsSection>,
+    onSelect: (SettingsSection) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Column {
+            items.forEachIndexed { index, item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(item) }
+                        .padding(horizontal = 16.dp, vertical = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            item.icon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            item.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            item.description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary
+                        )
+                    }
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = TextSecondary
+                    )
+                }
+                if (index < items.lastIndex) {
+                    HorizontalDivider(
+                        color = VaultDivider,
+                        modifier = Modifier.padding(start = 72.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -183,6 +236,7 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
     var usageAccessGranted by remember { mutableStateOf(false) }
     var appTimeError by remember { mutableStateOf<String?>(null) }
     var showAppPicker by remember { mutableStateOf(false) }
+    var appPickerQuery by remember { mutableStateOf("") }
     var limitEditorApp by remember { mutableStateOf<InstalledApp?>(null) }
     var limitMinutesInput by remember { mutableStateOf("10") }
     var appTimeUsage by remember { mutableStateOf(emptyMap<String, Long>()) }
@@ -210,6 +264,44 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
     var adultDomainError by remember { mutableStateOf<String?>(null) }
     var adultDomainBusy by remember { mutableStateOf(false) }
     var webDetailsTarget by remember { mutableStateOf<WebProtectionSetting?>(null) }
+    BackHandler(
+        enabled = webDetailsTarget != null ||
+            showAdultDomainEditor ||
+            showAdultDomainReview ||
+            showAppPicker ||
+            limitEditorApp != null ||
+            preparedWebLock != null ||
+            webUnlockTarget != null ||
+            unlockTarget != null
+    ) {
+        when {
+            preparedWebLock != null -> {
+                preparedWebLock = null
+                webLockKeySaved = false
+            }
+            webUnlockTarget != null -> webUnlockTarget = null
+            limitEditorApp != null -> limitEditorApp = null
+            showAppPicker -> {
+                showAppPicker = false
+                appPickerQuery = ""
+            }
+            showAdultDomainReview -> {
+                if (!adultDomainBusy) {
+                    showAdultDomainReview = false
+                    showAdultDomainEditor = true
+                }
+            }
+            showAdultDomainEditor -> {
+                if (!adultDomainBusy) {
+                    showAdultDomainEditor = false
+                    pendingAdultDomains = emptySet()
+                    originalAdultDomains = emptySet()
+                }
+            }
+            unlockTarget != null -> unlockTarget = null
+            webDetailsTarget != null -> webDetailsTarget = null
+        }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -557,7 +649,6 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
                     )
-                    HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 12.dp))
                 }
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -728,12 +819,7 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
         }
     } else {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(horizontal = 20.dp, vertical = 16.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to settings")
-            }
-            Text(section.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        }
+        PageHeader(title = section.title, onBack = onBack)
         if (!isDeviceOwner && section != SettingsSection.APP_LIMITS) {
             Text(
                 "Device controls and DNS filtering require Fortress Vault to be the device owner. Complete the one-time setup before enabling them.",
@@ -758,7 +844,6 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                     summary = "Device-wide domain filter",
                     checked = blockAdultSites,
                     locked = WebProtectionSetting.ADULT_SITES in webLocks,
-                    unlockAtMillis = webLocks[WebProtectionSetting.ADULT_SITES]?.unlockAtMillis,
                     enabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
                     onCheckedChange = { changeWebSetting(WebProtectionSetting.ADULT_SITES, it) },
                     onOpenDetails = { webDetailsTarget = WebProtectionSetting.ADULT_SITES }
@@ -768,7 +853,6 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                     summary = "Restrict browsers and VPN apps",
                     checked = blockBypassApps,
                     locked = WebProtectionSetting.CHROME_ONLY in webLocks,
-                    unlockAtMillis = webLocks[WebProtectionSetting.CHROME_ONLY]?.unlockAtMillis,
                     enabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
                     onCheckedChange = { changeWebSetting(WebProtectionSetting.CHROME_ONLY, it) },
                     onOpenDetails = { webDetailsTarget = WebProtectionSetting.CHROME_ONLY }
@@ -778,7 +862,6 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                     summary = "Block sealed-app domains in Chrome",
                     checked = blockSealedAppSites,
                     locked = WebProtectionSetting.SEALED_APP_WEBSITES in webLocks,
-                    unlockAtMillis = webLocks[WebProtectionSetting.SEALED_APP_WEBSITES]?.unlockAtMillis,
                     enabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
                     onCheckedChange = { changeWebSetting(WebProtectionSetting.SEALED_APP_WEBSITES, it) },
                     onOpenDetails = { webDetailsTarget = WebProtectionSetting.SEALED_APP_WEBSITES }
@@ -788,7 +871,6 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                     summary = "Disable private browsing in Chrome",
                     checked = blockChromeIncognito,
                     locked = WebProtectionSetting.CHROME_INCOGNITO in webLocks,
-                    unlockAtMillis = webLocks[WebProtectionSetting.CHROME_INCOGNITO]?.unlockAtMillis,
                     enabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
                     onCheckedChange = { changeWebSetting(WebProtectionSetting.CHROME_INCOGNITO, it) },
                     onOpenDetails = { webDetailsTarget = WebProtectionSetting.CHROME_INCOGNITO }
@@ -802,16 +884,14 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                 webLockError?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
-                HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 12.dp))
             }
             if (section == SettingsSection.APP_LIMITS) item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column {
                     WebProtectionSettingCard(
                         title = WebProtectionSetting.APP_TIME_LIMITS.title,
                         summary = "Daily allowances for selected apps",
                         checked = appTimeLimitsEnabled,
                         locked = WebProtectionSetting.APP_TIME_LIMITS in webLocks,
-                        unlockAtMillis = webLocks[WebProtectionSetting.APP_TIME_LIMITS]?.unlockAtMillis,
                         enabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy &&
                             (appTimeLimitsEnabled || appLimits.isNotEmpty()),
                         onCheckedChange = { changeWebSetting(WebProtectionSetting.APP_TIME_LIMITS, it) },
@@ -828,11 +908,11 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                         ) { Text("Grant Usage access") }
                     }
                     Row(
-                        Modifier.fillMaxWidth(),
+                        Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("App allowances", style = MaterialTheme.typography.titleSmall)
+                        Text("App allowances", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         TextButton(
                             enabled = !webProtectionBusy &&
                                 WebProtectionSetting.APP_TIME_LIMITS !in webLocks,
@@ -844,15 +924,29 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                             ?: limit.packageName
                         val usedMillis = appTimeUsage[limit.packageName] ?: 0L
                         Row(
-                            Modifier.fillMaxWidth(),
+                            Modifier.fillMaxWidth().padding(vertical = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            val appIcon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                                initialValue = null,
+                                key1 = limit.packageName
+                            ) {
+                                value = com.fortress.vault.core.IconCache.getIconAsync(context, limit.packageName)
+                            }
+                            if (appIcon != null) {
+                                Image(
+                                    bitmap = appIcon!!,
+                                    contentDescription = appName,
+                                    modifier = Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
+                                )
+                                Spacer(Modifier.width(14.dp))
+                            }
                             Column(Modifier.weight(1f)) {
-                                Text(appName, style = MaterialTheme.typography.bodyMedium)
+                                Text(appName, style = MaterialTheme.typography.bodyLarge)
                                 Text(
                                     "${(usedMillis / 60_000L).coerceAtMost(limit.limitMinutes.toLong())} / ${limit.limitMinutes} min today",
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     color = TextSecondary
                                 )
                             }
@@ -910,8 +1004,12 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                                     )
                                 }
                     if (active != null) {
-                        TextButton(onClick = { unlockTarget = control; phrase = ""; error = null }) {
-                            Text("Unlock", style = MaterialTheme.typography.bodyMedium)
+                        IconButton(onClick = { unlockTarget = control; phrase = ""; error = null }) {
+                            Icon(
+                                Icons.Filled.LockOpen,
+                                contentDescription = "Unlock ${control.title}",
+                                tint = TextSecondary
+                            )
                         }
                     }
                 }
@@ -1007,12 +1105,9 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
             WebProtectionSetting.APP_TIME_LIMITS -> appTimeLimitsEnabled
         },
         locked = setting in webLocks,
-        unlockAtMillis = webLocks[setting]?.unlockAtMillis,
-        savedDomainCount = adultDomainBlockCount,
         controlsEnabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
         busy = webProtectionBusy || adultDomainBusy,
         onDismiss = { webDetailsTarget = null },
-        onToggle = { changeWebSetting(setting, it) },
         onManageDomains = { openAdultDomainEditor() },
         onAddRecoveryKey = {
             webDetailsTarget = null
@@ -1028,91 +1123,119 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
     }
 
     unlockTarget?.let { control ->
-        AlertDialog(
-            onDismissRequest = { unlockTarget = null },
-            title = { Text("Unlock ${control.title}") },
-            text = {
-                Column {
-                    OutlinedTextField(value = phrase, onValueChange = { phrase = it }, label = { Text("Recovery phrase") })
-                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    if (ControlManager.unlock(context, control, phrase)) { unlockTarget = null; refresh() }
-                    else error = "Incorrect recovery phrase"
-                }) { Text("Unlock") }
-            },
-            dismissButton = { TextButton(onClick = { unlockTarget = null }) { Text("Cancel") } }
-        )
-    }
-
-    if (showAdultDomainEditor) {
-        AlertDialog(
-            onDismissRequest = {
-                if (!adultDomainBusy) {
-                    showAdultDomainEditor = false
-                    pendingAdultDomains = emptySet()
-                    originalAdultDomains = emptySet()
-                }
-            },
-            title = { Text("Manage Chrome blocks") },
-            text = {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                PageHeader(title = "Unlock ${control.title}", onBack = { unlockTarget = null })
                 Column(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Text(
-                        "These domains are blocked in managed Chrome while adult-site protection is on.",
+                        "Enter the recovery phrase saved when this control was locked.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary
                     )
-                    OutlinedTextField(
-                        value = adultDomainInput,
-                        onValueChange = { adultDomainInput = it },
-                        label = { Text("Website domain") },
-                        placeholder = { Text("example.com") },
-                        enabled = !adultDomainBusy,
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedButton(
-                        onClick = { stageAdultDomain() },
-                        enabled = adultDomainInput.isNotBlank() && !adultDomainBusy,
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
-                        Text("Add domain")
-                    }
-                    Text(
-                        "DOMAINS",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = BrassPrimary
-                    )
-                    if (pendingAdultDomains.isEmpty()) {
-                        Text(
-                            "No custom domains.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
+                    SettingsCard {
+                        OutlinedTextField(
+                            value = phrase,
+                            onValueChange = { phrase = it },
+                            label = { Text("Recovery phrase") },
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            minLines = 4
                         )
-                    } else {
-                        Column(
-                            modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+                    }
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+                Button(
+                    onClick = {
+                        if (ControlManager.unlock(context, control, phrase)) {
+                            unlockTarget = null
+                            refresh()
+                        } else {
+                            error = "Incorrect recovery phrase"
+                        }
+                    },
+                    enabled = phrase.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
+                ) {
+                    Text("Unlock", color = MaterialTheme.colorScheme.background)
+                }
+            }
+        }
+    }
+
+    if (showAdultDomainEditor) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                PageHeader(
+                    title = "Custom Chrome blocks",
+                    onBack = {
+                        if (!adultDomainBusy) {
+                            showAdultDomainEditor = false
+                            pendingAdultDomains = emptySet()
+                            originalAdultDomains = emptySet()
+                        }
+                    }
+                )
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        "Add domains that should be blocked in managed Chrome while protection is on.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = adultDomainInput,
+                            onValueChange = { adultDomainInput = it },
+                            label = { Text("Website domain") },
+                            placeholder = { Text("example.com") },
+                            enabled = !adultDomainBusy,
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            onClick = { stageAdultDomain() },
+                            enabled = adultDomainInput.isNotBlank() && !adultDomainBusy,
+                            colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
                         ) {
-                            pendingAdultDomains.sorted().forEach { domain ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(domain, style = MaterialTheme.typography.bodyLarge)
-                                    TextButton(
-                                        enabled = !adultDomainBusy,
-                                        onClick = { pendingAdultDomains = pendingAdultDomains - domain }
+                            Text("Add", color = MaterialTheme.colorScheme.background)
+                        }
+                    }
+                    SettingsCard {
+                        Column {
+                            Text(
+                                "Saved domains",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                            if (pendingAdultDomains.isEmpty()) {
+                                Text(
+                                    "No custom domains.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextSecondary,
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                                )
+                            } else {
+                                pendingAdultDomains.sorted().forEach { domain ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, bottom = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text("Remove")
+                                        Text(domain, style = MaterialTheme.typography.bodyLarge)
+                                        TextButton(
+                                            enabled = !adultDomainBusy,
+                                            onClick = { pendingAdultDomains = pendingAdultDomains - domain }
+                                        ) {
+                                            Text("Remove")
+                                        }
                                     }
                                 }
-                                HorizontalDivider(color = VaultDivider)
                             }
                         }
                     }
@@ -1120,71 +1243,56 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-            },
-            confirmButton = {
                 Button(
                     enabled = pendingAdultDomains != originalAdultDomains && !adultDomainBusy,
                     onClick = {
-                        showAdultDomainEditor = false
                         showAdultDomainReview = true
                         adultDomainConfirmed = false
                         adultDomainError = null
-                    }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
                 ) {
-                    Text("Review changes")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !adultDomainBusy,
-                    onClick = {
-                        showAdultDomainEditor = false
-                        pendingAdultDomains = emptySet()
-                        originalAdultDomains = emptySet()
-                        adultDomainError = null
-                    }
-                ) {
-                    Text("Cancel")
+                    Text("Review changes", color = MaterialTheme.colorScheme.background)
                 }
             }
-        )
+        }
     }
 
     if (showAdultDomainReview) {
-        AlertDialog(
-            onDismissRequest = {
-                if (!adultDomainBusy) {
-                    showAdultDomainReview = false
-                    showAdultDomainEditor = true
-                }
-            },
-            title = { Text("Confirm Chrome blocks") },
-            text = {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                PageHeader(
+                    title = "Review Chrome blocks",
+                    onBack = {
+                        if (!adultDomainBusy) {
+                            showAdultDomainReview = false
+                            showAdultDomainEditor = true
+                        }
+                    }
+                )
                 Column(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Text(
-                        "Review the complete list that will be saved. These rules apply in managed Google Chrome only while adult-site protection is on.",
+                        "Review the complete list before saving. These rules apply in managed Chrome while adult-site protection is on.",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        "Only adult-site protection's recovery key can prevent later viewing or editing of this list.",
+                        "Only the recovery phrase can prevent later editing while the feature is locked.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error
+                        color = TextSecondary
                     )
-                    if (pendingAdultDomains.isEmpty()) {
-                        Text("The saved domain list will be empty.", style = MaterialTheme.typography.bodyLarge)
-                    } else Column(
-                        modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
-                    ) {
-                        pendingAdultDomains.sorted().forEach { domain ->
-                            Text(
-                                domain,
-                                style = MaterialTheme.typography.bodyLarge,
-                                modifier = Modifier.padding(vertical = 5.dp)
-                            )
-                            HorizontalDivider(color = VaultDivider)
+                    SettingsCard {
+                        Column(Modifier.padding(16.dp)) {
+                            if (pendingAdultDomains.isEmpty()) {
+                                Text("The saved domain list will be empty.", color = TextSecondary)
+                            } else {
+                                pendingAdultDomains.sorted().forEach { domain ->
+                                    Text(domain, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(vertical = 7.dp))
+                                }
+                            }
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1202,127 +1310,205 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-            },
-            confirmButton = {
                 Button(
                     enabled = adultDomainConfirmed &&
                         pendingAdultDomains != originalAdultDomains &&
                         !adultDomainBusy,
-                    onClick = { saveAdultDomainBlocks() }
+                    onClick = { saveAdultDomainBlocks() },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
                 ) {
-                    Text(if (adultDomainBusy) "Applying…" else "Confirm changes")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !adultDomainBusy,
-                    onClick = {
-                        showAdultDomainReview = false
-                        showAdultDomainEditor = true
-                    }
-                ) {
-                    Text("Back to list")
+                    Text(if (adultDomainBusy) "Applying…" else "Save changes", color = MaterialTheme.colorScheme.background)
                 }
             }
-        )
+        }
     }
 
     if (showAppPicker) {
-        AlertDialog(
-            onDismissRequest = { showAppPicker = false },
-            title = { Text("Choose an app") },
-            text = {
-                val candidates = launchableApps.filter { app ->
-                    app.packageName != context.packageName &&
-                        appLimits.none { it.packageName == app.packageName } &&
-                        app.packageName !in VaultManager.blockedPackages(context) &&
-                        app.packageName !in ControlManager.newlyBlockedPackages(context)
-                }
-                if (candidates.isEmpty()) {
-                    Text("No eligible apps are available to add.")
-                } else {
-                    LazyColumn(Modifier.heightIn(max = 440.dp)) {
-                        items(candidates, key = { it.packageName }) { app ->
-                            TextButton(
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = {
-                                    showAppPicker = false
-                                    limitMinutesInput = "10"
-                                    limitEditorApp = app
+        val candidates = launchableApps.filter { app ->
+            app.packageName != context.packageName &&
+                app.label.contains(appPickerQuery, ignoreCase = true) &&
+                appLimits.none { it.packageName == app.packageName } &&
+                app.packageName !in VaultManager.blockedPackages(context) &&
+                app.packageName !in ControlManager.newlyBlockedPackages(context)
+        }
+        Dialog(
+            onDismissRequest = {
+                showAppPicker = false
+                appPickerQuery = ""
+            },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                    PageHeader(
+                        title = "Choose an app",
+                        onBack = {
+                            showAppPicker = false
+                            appPickerQuery = ""
+                        }
+                    )
+                    OutlinedTextField(
+                        value = appPickerQuery,
+                        onValueChange = { appPickerQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(50),
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        placeholder = { Text("Search for apps") }
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    if (candidates.isEmpty()) {
+                        Text(
+                            "No eligible apps are available to add.",
+                            color = TextSecondary,
+                            modifier = Modifier.padding(4.dp)
+                        )
+                    } else {
+                        SettingsCard(modifier = Modifier.weight(1f)) {
+                            LazyColumn {
+                                items(candidates, key = { it.packageName }) { app ->
+                                    TextButton(
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                        onClick = {
+                                            showAppPicker = false
+                                            appPickerQuery = ""
+                                            limitMinutesInput = "10"
+                                            limitEditorApp = app
+                                        }
+                                    ) {
+                                        Text(
+                                            app.label,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = TextPrimary
+                                        )
+                                    }
                                 }
-                            ) {
-                                Text(app.label, modifier = Modifier.fillMaxWidth())
                             }
                         }
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showAppPicker = false }) { Text("Cancel") }
             }
-        )
+        }
     }
 
     limitEditorApp?.let { app ->
-        AlertDialog(
-            onDismissRequest = { limitEditorApp = null },
-            title = { Text("Daily limit for ${app.label}") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("The app will be suspended when it reaches this much foreground use today.")
-                    OutlinedTextField(
-                        value = limitMinutesInput,
-                        onValueChange = { value ->
-                            if (value.all(Char::isDigit)) limitMinutesInput = value
-                        },
-                        label = { Text("Minutes per day (1–1440)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true
+        val selectedMinutes = limitMinutesInput.toIntOrNull()?.coerceIn(1, 24 * 60) ?: 10
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(
+                Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)
+            ) {
+                PageHeader(title = "Daily app limit", onBack = { limitEditorApp = null })
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    Text(app.label, style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        "Choose how long this app can be used each day. The allowance resets at local midnight.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
                     )
+                    SettingsCard {
+                        Column(Modifier.padding(20.dp)) {
+                            Text(
+                                formatLimitDuration(selectedMinutes),
+                                style = MaterialTheme.typography.displaySmall,
+                                color = TextPrimary
+                            )
+                            Text("per day", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                            Spacer(Modifier.height(20.dp))
+                            Slider(
+                                value = selectedMinutes.toFloat(),
+                                onValueChange = {
+                                    limitMinutesInput = it.toInt().coerceIn(1, 24 * 60).toString()
+                                },
+                                valueRange = 1f..(24 * 60).toFloat(),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = BrassPrimary,
+                                    activeTrackColor = BrassPrimary
+                                )
+                            )
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("1 min", color = TextSecondary)
+                                Text("24 hours", color = TextSecondary)
+                            }
+                        }
+                    }
+                    Text("Common limits", style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(10, 30, 60, 120).forEach { minutes ->
+                            FilterChip(
+                                selected = selectedMinutes == minutes,
+                                onClick = { limitMinutesInput = minutes.toString() },
+                                label = { Text(formatLimitDuration(minutes)) }
+                            )
+                        }
+                    }
                     appTimeError?.let {
                         Text(it, color = MaterialTheme.colorScheme.error)
                     }
                 }
-            },
-            confirmButton = {
                 Button(
-                    enabled = limitMinutesInput.toIntOrNull() in 1..(24 * 60),
+                    enabled = selectedMinutes in 1..(24 * 60),
                     onClick = {
-                        val minutes = limitMinutesInput.toInt()
-                        saveAppLimit(app.packageName, minutes)
+                        saveAppLimit(app.packageName, selectedMinutes)
                         limitEditorApp = null
-                    }
-                ) { Text("Save limit") }
-            },
-            dismissButton = {
-                TextButton(onClick = { limitEditorApp = null }) { Text("Cancel") }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
+                ) {
+                    Text("Save limit", color = MaterialTheme.colorScheme.background)
+                }
             }
-        )
+        }
     }
 
     preparedWebLock?.let { webLock ->
         val clipboard = LocalClipboardManager.current
-        AlertDialog(
-            onDismissRequest = {
-                preparedWebLock = null
-                webLockKeySaved = false
-            },
-            title = { Text("Lock ${webLock.lock.setting.title}?") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                PageHeader(
+                    title = "Lock ${webLock.lock.setting.title}",
+                    onBack = {
+                        preparedWebLock = null
+                        webLockKeySaved = false
+                    }
+                )
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
                     Text(
-                        "The protection stays on after this timer ends. Only the recovery lock expires; the setting then becomes editable."
+                        "Save the recovery phrase before locking this protection. The protection stays on after the recovery timer ends.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
                     )
+                    SettingsCard {
+                        Column(Modifier.padding(18.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Lock duration", style = MaterialTheme.typography.bodyLarge)
+                        Text("Lock duration", style = MaterialTheme.typography.titleMedium)
                         Text(
                             "$webLockDurationDays days",
                             style = MaterialTheme.typography.titleMedium,
-                            color = BrassPrimary
+                            color = TextPrimary
                         )
                     }
                     Slider(
@@ -1355,26 +1541,32 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                             color = TextSecondary
                         )
                     }
+                        }
+                    }
+                    SettingsCard {
+                        Column(Modifier.padding(18.dp)) {
+                            Text("Recovery phrase", style = MaterialTheme.typography.titleMedium)
                     Text(
                         webLock.recoveryPhrase,
                         style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-                        color = BrassPrimary
+                        color = TextPrimary,
+                        modifier = Modifier.padding(vertical = 14.dp)
                     )
                     TextButton(
                         onClick = {
                             clipboard.setText(androidx.compose.ui.text.AnnotatedString(webLock.recoveryPhrase))
                         }
                     ) { Text("Copy recovery phrase") }
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = webLockKeySaved,
                             onCheckedChange = { webLockKeySaved = it }
                         )
-                        Text("I saved this phrase somewhere safe.")
+                        Text("I saved this phrase somewhere safe.", color = TextSecondary)
                     }
                 }
-            },
-            confirmButton = {
                 Button(
                     enabled = webLockKeySaved && !webProtectionBusy,
                     onClick = {
@@ -1400,59 +1592,56 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                                 webProtectionBusy = false
                             }
                         }
-                    }
-                ) { Text("Save key and lock") }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        preparedWebLock = null
-                        webLockKeySaved = false
-                    }
-                ) { Text("Cancel") }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
+                ) { Text("Save key and lock", color = MaterialTheme.colorScheme.background) }
             }
-        )
+        }
     }
 
     webUnlockTarget?.let { setting ->
-        AlertDialog(
-            onDismissRequest = {
-                webUnlockTarget = null
-                webRecoveryPhrase = ""
-                webLockError = null
-            },
-            title = { Text("Unlock ${setting.title}") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Enter the recovery phrase saved when this setting was locked.")
-                    OutlinedTextField(
-                        value = webRecoveryPhrase,
-                        onValueChange = { webRecoveryPhrase = it },
-                        label = { Text("Recovery phrase") },
-                        enabled = !webProtectionBusy,
-                        singleLine = false
-                    )
-                    webLockError?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    enabled = webRecoveryPhrase.isNotBlank() && !webProtectionBusy,
-                    onClick = { unlockWebSetting(setting) }
-                ) { Text(if (webProtectionBusy) "Checking..." else "Unlock") }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                PageHeader(
+                    title = "Unlock ${setting.title}",
+                    onBack = {
                         webUnlockTarget = null
                         webRecoveryPhrase = ""
                         webLockError = null
                     }
-                ) { Text("Cancel") }
+                )
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        "Enter the recovery phrase saved when this setting was locked.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                    SettingsCard {
+                        OutlinedTextField(
+                            value = webRecoveryPhrase,
+                            onValueChange = { webRecoveryPhrase = it },
+                            label = { Text("Recovery phrase") },
+                            enabled = !webProtectionBusy,
+                            minLines = 4,
+                            modifier = Modifier.fillMaxWidth().padding(16.dp)
+                        )
+                    }
+                    webLockError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+                Button(
+                    enabled = webRecoveryPhrase.isNotBlank() && !webProtectionBusy,
+                    onClick = { unlockWebSetting(setting) },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
+                ) {
+                    Text(if (webProtectionBusy) "Checking..." else "Unlock", color = MaterialTheme.colorScheme.background)
+                }
             }
-        )
+        }
     }
 }
 
@@ -1462,30 +1651,23 @@ private fun WebProtectionSettingCard(
     summary: String,
     checked: Boolean,
     locked: Boolean,
-    unlockAtMillis: Long?,
     enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     onOpenDetails: () -> Unit
 ) {
-    Column(
+    SettingsCard(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onOpenDetails),
+            .padding(bottom = 10.dp)
+            .clickable(onClick = onOpenDetails)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                 Text(summary, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                if (locked) {
-                    Text(
-                        expiryLabel(unlockAtMillis),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = BrassPrimary
-                    )
-                }
             }
             Switch(
                 checked = checked,
@@ -1493,7 +1675,6 @@ private fun WebProtectionSettingCard(
                 onCheckedChange = onCheckedChange
             )
         }
-        HorizontalDivider(color = VaultDivider)
     }
 }
 
@@ -1502,16 +1683,14 @@ private fun WebProtectionDetailsDialog(
     setting: WebProtectionSetting,
     enabled: Boolean,
     locked: Boolean,
-    unlockAtMillis: Long?,
-    savedDomainCount: Int,
     controlsEnabled: Boolean,
     busy: Boolean,
     onDismiss: () -> Unit,
-    onToggle: (Boolean) -> Unit,
     onManageDomains: () -> Unit,
     onAddRecoveryKey: () -> Unit,
     onUnlock: () -> Unit
 ) {
+    var showInfo by remember { mutableStateOf(false) }
     val details = when (setting) {
         WebProtectionSetting.ADULT_SITES -> WebProtectionDetails(
             description = "Uses Android Private DNS to filter adult domains across the device. Chrome also uses SafeSearch and has secure DNS disabled.",
@@ -1540,42 +1719,12 @@ private fun WebProtectionDetailsDialog(
         )
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(0.dp),
             color = MaterialTheme.colorScheme.background
         ) {
             Column(Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to settings")
-                    }
-                    Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                        Text(
-                            "WEB PROTECTION",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = BrassPrimary
-                        )
-                        Text(
-                            setting.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Icon(
-                        Icons.Filled.Shield,
-                        contentDescription = null,
-                        tint = BrassPrimary,
-                        modifier = Modifier.padding(end = 12.dp).size(24.dp)
-                    )
-                }
+                PageHeader(title = setting.title, onBack = onDismiss)
 
                 Column(
                     modifier = Modifier
@@ -1590,116 +1739,88 @@ private fun WebProtectionDetailsDialog(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.Shield, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(10.dp))
-                            Column {
+                            Column(Modifier.weight(1f)) {
                                 Text(
                                     if (enabled) "Protection is on" else "Protection is off",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
-                                Text(details.scope, style = MaterialTheme.typography.bodySmall, color = BrassPrimary)
+                                Text(details.scope, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                            }
+                            Box {
+                                IconButton(onClick = { showInfo = !showInfo }) {
+                                    Icon(Icons.Filled.Info, contentDescription = "More information", tint = TextSecondary)
+                                }
+                                DropdownMenu(
+                                    expanded = showInfo,
+                                    onDismissRequest = { showInfo = false },
+                                    modifier = Modifier.widthIn(max = 300.dp)
+                                ) {
+                                    Surface(color = SteelSurfaceHigh) {
+                                        Text(
+                                            details.description,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = TextSecondary,
+                                            modifier = Modifier.padding(16.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
-                        Text(
-                            details.description,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 10.dp)
-                        )
-                        HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(top = 14.dp))
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Enabled", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                            if (locked) Text("Recovery locked", style = MaterialTheme.typography.bodySmall, color = BrassPrimary)
-                        }
-                        Switch(
-                            checked = enabled,
-                            enabled = controlsEnabled && !locked,
-                            onCheckedChange = onToggle
-                        )
+                        Spacer(Modifier.height(8.dp))
                     }
 
                     if (setting == WebProtectionSetting.ADULT_SITES) {
-                        Column(Modifier.fillMaxWidth()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                )
-                                {
+                        SettingsCard(
+                            modifier = Modifier
+                                .clickable(enabled = !locked && controlsEnabled && !busy) {
+                                    onManageDomains()
+                                }
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                     Icon(
                                         imageVector = Icons.Filled.Language,
                                         contentDescription = null,
                                         tint = BrassPrimary,
                                         modifier = Modifier.size(24.dp)
                                     )
+                                    Spacer(Modifier.width(14.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(
                                             "Custom Chrome blocks",
                                             style = MaterialTheme.typography.bodyLarge,
                                             fontWeight = FontWeight.SemiBold
                                         )
-                                        Text(
-                                            if (locked) {
-                                                "List hidden while recovery lock is active."
-                                            } else if (savedDomainCount == 0) {
-                                                "Add domains the filter misses."
-                                            } else {
-                                                "$savedDomainCount saved"
-                                            },
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = TextSecondary
-                                        )
                                     }
                                     if (!locked) {
-                                        TextButton(
-                                            enabled = controlsEnabled && !busy,
-                                            onClick = onManageDomains
-                                        ) {
-                                            Text(if (savedDomainCount == 0) "Add" else "Manage")
-                                        }
+                                        Icon(
+                                            Icons.Filled.ChevronRight,
+                                            contentDescription = "Open custom Chrome blocks",
+                                            tint = TextSecondary
+                                        )
                                     }
                                 }
-                                HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(vertical = 10.dp))
-                                Text(
-                                    "Custom blocks apply in Chrome while protection is on.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary
-                                )
                         }
                     }
 
                     if (locked) {
-                        Column(Modifier.fillMaxWidth()) {
-                                Text(
-                                    "RECOVERY LOCK",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = BrassPrimary
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            IconButton(
+                                enabled = controlsEnabled && !busy,
+                                onClick = onUnlock
+                            ) {
+                                Icon(
+                                    Icons.Filled.LockOpen,
+                                    contentDescription = "Unlock feature",
+                                    tint = TextSecondary
                                 )
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    expiryLabel(unlockAtMillis),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    "The protection stays on when the recovery lock expires.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = TextSecondary,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                                TextButton(
-                                    enabled = controlsEnabled && !busy,
-                                    onClick = onUnlock,
-                                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 8.dp)
-                                ) {
-                                    Text("Unlock with recovery phrase")
-                                }
-                            HorizontalDivider(color = VaultDivider)
+                            }
                         }
                     } else {
                         OutlinedButton(
@@ -1707,14 +1828,11 @@ private fun WebProtectionDetailsDialog(
                             onClick = onAddRecoveryKey,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Add recovery key")
+                            Text("Lock feature")
                         }
                     }
-
-                    Text(details.note, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                 }
 
-                HorizontalDivider(color = VaultDivider)
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
@@ -1726,7 +1844,6 @@ private fun WebProtectionDetailsDialog(
                     Text("Done")
                 }
             }
-        }
     }
 }
 
@@ -1735,16 +1852,6 @@ private data class WebProtectionDetails(
     val scope: String,
     val note: String
 )
-
-@Composable
-private fun expiryLabel(unlockAtMillis: Long?): String {
-    val context = LocalContext.current
-    val until = unlockAtMillis ?: 0L
-    if (until == 0L) return "Recovery protected"
-    val daysLeft = ((until - TimeKeeper.estimateCurrentTrustedTimeMillis(context))
-        .coerceAtLeast(0L) + TimeUnit.DAYS.toMillis(1) - 1) / TimeUnit.DAYS.toMillis(1)
-    return "Recovery key · $daysLeft days left"
-}
 
 @Composable
 private fun RecoveryPhraseCard(index: Int, control: DeviceControl, phrase: String) {
@@ -1784,4 +1891,14 @@ private fun DeviceControl.effect(): String = when (this) {
     DeviceControl.USB_DEBUGGING -> "USB debugging is disabled until this control expires or is unlocked."
     DeviceControl.USER_ACCOUNTS -> "Adding users and switching user accounts is disabled until this control expires or is unlocked."
     DeviceControl.APP_INSTALLS -> "App updates remain available. Uninstalling apps is blocked, and newly installed apps are suspended and removed automatically while this control is active."
+}
+
+private fun formatLimitDuration(minutes: Int): String {
+    val hours = minutes / 60
+    val remainingMinutes = minutes % 60
+    return when {
+        hours == 0 -> "$remainingMinutes min"
+        remainingMinutes == 0 -> "$hours hr"
+        else -> "$hours hr $remainingMinutes min"
+    }
 }

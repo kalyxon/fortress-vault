@@ -13,6 +13,8 @@ import androidx.compose.ui.unit.dp
 import com.fortress.vault.core.OnboardingPrefs
 import com.fortress.vault.ui.theme.BrassPrimary
 import com.fortress.vault.ui.theme.EmberRed
+import com.fortress.vault.ui.components.PageHeader
+import com.fortress.vault.ui.components.SettingsCard
 
 @Composable
 fun TermsScreen(onAccepted: () -> Unit) {
@@ -30,8 +32,9 @@ fun TermsScreen(onAccepted: () -> Unit) {
             .background(MaterialTheme.colorScheme.background)
             .padding(24.dp)
     ) {
+        PageHeader(title = "Before you begin")
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Text("Before You Begin", style = MaterialTheme.typography.headlineMedium, color = EmberRed)
+            Text("Read this carefully", style = MaterialTheme.typography.headlineMedium, color = EmberRed)
             Spacer(Modifier.height(16.dp))
 
             WarningBlock(
@@ -113,14 +116,12 @@ fun TermsScreen(onAccepted: () -> Unit) {
 
 @Composable
 private fun WarningBlock(title: String, body: String) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(6.dp))
-        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
-            modifier = Modifier.padding(top = 12.dp)
-        )
+    SettingsCard(modifier = Modifier.padding(vertical = 6.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(6.dp))
+            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
