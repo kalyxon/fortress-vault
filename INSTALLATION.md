@@ -77,6 +77,21 @@ Alternatively, open **Fortress Vault** from the device launcher.
 
 When the app displays the setup screen, tap **I've Run The Command**. The app checks Device Owner status before allowing the vault setup to continue.
 
+## Update An Existing Installation
+
+Build or download the newer APK, then install it over the existing Fortress
+installation:
+
+```bash
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+Do not uninstall Fortress or clear its app data to update it; that can remove
+local state and complicate recovery of the device-owner-managed state. Android
+requires the update to use a signing key compatible with the installed
+version. An ordinary app update keeps Device Owner provisioning in place, so
+do not run `dpm set-device-owner` again.
+
 ## Seal Applications
 
 After Device Owner status is confirmed:
@@ -109,7 +124,7 @@ app/build/outputs/apk/release/app-release.apk
 ```
 
 ### GitHub Releases & Automated Build
-This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`). When you tag a release (e.g. `git tag v1.2.0 && git push origin v1.2.0`), GitHub Actions will automatically build the release APK and attach `FortressVault-v1.2.0.apk` directly to the GitHub Release page for users to download.
+This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`). When you tag a release (e.g. `git tag v1.3.0 && git push origin v1.3.0`), GitHub Actions will automatically build the release APK and attach `FortressVault-v1.3.0.apk` directly to the GitHub Release page for users to download.
 
 ## Troubleshooting
 

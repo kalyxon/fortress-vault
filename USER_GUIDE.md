@@ -155,7 +155,7 @@ If your phone does not have a lock set up yet, the app will prompt you to create
 
 ### Set the Duration
 
-Choose how long the apps should remain blocked. You can set hours or days. The time cannot be bypassed by changing the clock on your phone — Fortress Vault verifies the time against external internet time servers.
+Choose how long the apps should remain blocked, from 1 hour to 365 days. You can set hours or days. The time cannot be bypassed by changing the clock on your phone — Fortress Vault verifies the time against external internet time servers.
 
 ---
 
@@ -173,6 +173,22 @@ Once you have written the phrase down, confirm it and tap **Seal Vault**.
 
 The selected apps are immediately hidden and suspended. They will not appear in your launcher, the Play Store, or in Android settings. If you restart your phone or if someone tries to reinstall a blocked app, Fortress Vault re-enforces the block automatically.
 
+### Web Protection
+
+Open **Device Controls → Web Protection** to configure the optional web filters:
+
+- **Block adult websites** uses CleanBrowsing's adult-filter Private DNS service, locks the Private DNS setting, and applies Chrome SafeSearch while turning Chrome Secure DNS off. It requires Android 10 or newer and Fortress Vault to be the Device Owner. The setting filters domain names, not page paths or individual images; explicit content hosted on otherwise allowed domains may still load.
+- Open **Block adult websites → Custom Chrome blocks** to view, add, or remove domains. Review the complete proposed list and confirm before saving. The list is available only while the adult-sites recovery lock is not active; when locked, domain names are hidden and edits are unavailable until the lock is unlocked or expires. Rules apply only in managed Google Chrome and only while adult-site protection is enabled; other browsers are unaffected. Chrome must be installed to manage the list.
+- **Allow only Chrome and block VPN apps** is off by default and works independently from website rules. When enabled, it prevents VPN configuration through Android Settings and hides apps Android registers as browsers, except Chrome, plus a maintained list of common VPN apps. Newly installed browsers are hidden when Android reports the package change. Turn it off if you need another browser or VPN app; website rules then apply only in Chrome and may be bypassed in other browsers. It cannot identify every VPN, proxy, or app with its own encrypted DNS.
+- **Block websites for sealed apps** is enabled by default. When you seal a supported app such as Instagram, YouTube, TikTok, Facebook, X, Snapchat, Reddit, Discord, WhatsApp, Telegram, LinkedIn, Pinterest, Tumblr, or Twitch, Fortress Vault also blocks its known website domains in managed Google Chrome. The rule is updated when seals change and after reboot. Chrome must be installed, and this policy does not cover other browsers or every website associated with every app.
+- **Disable Chrome Incognito** is an independent switch, off by default. When on, it disables private browsing in managed Google Chrome; when off, it explicitly allows Incognito even if other web protections are enabled. Restart Chrome after changing the setting; if Incognito does not match the switch, check `chrome://policy` for `IncognitoModeAvailability`.
+- **Daily app time limits** lets you choose a foreground-use allowance for each app (1 minute to 24 hours per local day). Grant Fortress Vault **Usage access** in Android Settings, add an app, set its daily limit, then enable the feature. When Android reports that an app has reached its allowance, Fortress suspends it until the next local day. This requires Device Owner access; sealed apps cannot also have daily limits.
+- Protections and daily app time limits can be left editable or locked separately with their own recovery phrase. When adding a recovery key, choose a lock duration from 7 to 365 days (30 days by default). At expiry, the protection stays enabled and becomes editable; entering the recovery phrase unlocks it early. Save the phrase outside the phone. Locking requires Android 11 or newer and Device Owner access.
+- During seal creation, enter a domain for an app and tap **Add** before sealing. For an existing seal, tap its card and choose **Websites** to see saved domains and add more; tap **Add** for each new entry, then **Save websites**. Once the seal is committed, rules are append-only and cannot be removed until that seal ends. Enter a domain such as `example.com` or a full HTTP(S) address; Fortress blocks that domain and its subdomains in managed Chrome even if the general known-site toggle is later turned off.
+- Incognito and website policies apply only in managed Google Chrome; they do not disable private browsing in other browsers. If website filtering or Incognito changes do not appear, restart Chrome and inspect `chrome://policy` for `IncognitoModeAvailability` and `URLBlocklist`.
+
+These filters do not inspect HTTPS traffic or images and cannot guarantee that all adult content or every alternative website is blocked. Blocking specific content inside an otherwise allowed website requires browser-level or provider-level content classification; this app does not decrypt HTTPS traffic.
+
 ---
 
 ### Emergency Early Unlock
@@ -183,7 +199,15 @@ If you need to access a blocked app before the timer ends:
 2. Tap **Emergency Unlock**.
 3. Enter your 12-word recovery phrase.
 
-The apps will be restored.
+Fortress removes that seal only after Android confirms that its apps have been
+unhidden and unsuspended. If Android cannot confirm the change, the unlock
+fails safely and the seal remains active so you can retry. An app that is also
+included in another active seal remains blocked until that seal ends or is
+unlocked.
+
+App-install protection is a separate control. Unlocking an app seal does not
+unlock or disable app-install protection, and app-install protection does not
+prevent a successfully unsealed app from being restored.
 
 ---
 
@@ -192,8 +216,11 @@ The apps will be restored.
 Fortress Vault includes additional locks that can be enabled separately, each with its own timer and recovery phrase:
 
 - **Block USB Debugging** — Prevents anyone from connecting to your phone via ADB while the lock is active.
-- **Block Account Changes** — Prevents signing in or out of accounts.
-- **Block App Installation** — Prevents downloading new apps from the Play Store.
+- **Block additional user accounts** — Prevents adding or switching Android user accounts.
+- **Block new apps / uninstalls** — In update-friendly mode, existing apps can still update, uninstalling apps is blocked, and newly installed apps are suspended and removed. This mode can last up to 90 days.
+- **Full install block** — The optional stricter mode also blocks app installation and updates using Android restrictions. It can last up to 30 days.
+
+These controls are independent of app seals. Each has its own recovery phrase and timer; emergency-unlocking a seal does not unlock a device control. Restoring an app when app-install protection is active does not cause Fortress to classify that app as a new installation.
 
 ---
 
@@ -223,6 +250,15 @@ Fortress Vault is already configured as Device Owner. Open the app and tap **"I'
 
 ---
 
+**Updating Fortress Vault on a provisioned device**
+
+Install the newer APK as an update to the existing app; do not uninstall Fortress
+or clear its storage. This preserves Device Owner status and saved seal/control
+state. The update must be signed with a compatible signing key. Do not run
+`dpm set-device-owner` again for an ordinary app update.
+
+---
+
 **Can I sign into Google after setup?**
 
-Yes. Once Device Owner is confirmed in the app, you can sign into your Google Account, restore apps from the Play Store, and use the phone as normal. The only restriction during the sealed period is whatever you have chosen to block inside Fortress Vault.
+Yes. Once Device Owner is confirmed in the app, you can sign into your Google Account, restore apps from the Play Store, and use the phone as normal. While active, Fortress applies the app seals and any device or web controls you have chosen to enable.

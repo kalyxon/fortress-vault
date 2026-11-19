@@ -6,6 +6,9 @@ import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.fortress.vault.core.VaultManager
+import com.fortress.vault.core.ControlManager
+import com.fortress.vault.core.WebProtectionLockManager
+import com.fortress.vault.core.AppTimeLimitManager
 
 class SentinelWorker(
     context: Context,
@@ -13,7 +16,12 @@ class SentinelWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        if (!VaultManager.isSealed(applicationContext)) {
+        WebProtectionLockManager.reconcileExpired(applicationContext)
+        if (!VaultManager.isSealed(applicationContext) &&
+            ControlManager.activeLocks(applicationContext).isEmpty() &&
+            WebProtectionLockManager.activeLocks(applicationContext).isEmpty() &&
+            !AppTimeLimitManager.hasActiveWork(applicationContext)
+        ) {
             return Result.success()
         }
 

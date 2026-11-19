@@ -1,6 +1,7 @@
 package com.fortress.vault.ui.screens
 
 import android.content.Intent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -9,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,11 +19,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
-import com.fortress.vault.core.MAX_SEAL_DURATION_DAYS
 import com.fortress.vault.core.MAX_APPS_PER_SEAL
-import com.fortress.vault.core.MIN_SEAL_DURATION_DAYS
+import com.fortress.vault.core.MAX_SEAL_DURATION_HOURS
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.ui.theme.BrassPrimary
 import com.fortress.vault.ui.theme.CharcoalSurface
@@ -29,10 +32,17 @@ import com.fortress.vault.ui.theme.EmberRed
 import com.fortress.vault.ui.theme.SteelSurfaceHigh
 import com.fortress.vault.ui.theme.TextPrimary
 import com.fortress.vault.ui.theme.TextSecondary
+import com.fortress.vault.ui.theme.VaultDivider
+import com.fortress.vault.ui.components.PageHeader
+import com.fortress.vault.ui.components.SectionLabel
+import com.fortress.vault.ui.components.SettingsCard
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -49,7 +59,9 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
 
     var step by remember { mutableStateOf(SealStep.SELECT_APPS) }
     var selectedPackages by remember { mutableStateOf(setOf<String>()) }
-    var durationDays by remember { mutableStateOf(30) }
+    var websiteDomains by remember { mutableStateOf<Map<String, Set<String>>>(emptyMap()) }
+    var durationAmount by remember { mutableIntStateOf(30) }
+    var durationInDays by remember { mutableStateOf(true) }
     var recoveryPhrase by remember { mutableStateOf<String?>(null) }
     var pendingSeal by remember { mutableStateOf<com.fortress.vault.core.Seal?>(null) }
     var hasWrittenDown by remember { mutableStateOf(false) }
@@ -62,6 +74,10 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
     // sealByPackage and hasSecureLock are computed on IO to avoid main-thread IPC/KeyguardManager calls
     var sealByPackage by remember { mutableStateOf<Map<String, com.fortress.vault.core.Seal>>(emptyMap()) }
     var hasSecureLock by remember { mutableStateOf(true) } // optimistic default until IO confirms
+    val stepProgress by animateFloatAsState(
+        targetValue = (step.ordinal + 1) / SealStep.entries.size.toFloat(),
+        label = "seal-setup-progress"
+    )
 
     LaunchedEffect(Unit) {
         // Load apps, sealed package map, and secure lock check all on IO
@@ -86,39 +102,72 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
             .background(MaterialTheme.colorScheme.background)
             .padding(24.dp)
     ) {
+        val goBack = {
+            when (step) {
+                SealStep.SELECT_APPS -> onCancel()
+                SealStep.SET_DURATION -> step = SealStep.SELECT_APPS
+                SealStep.CONFIRM_SEAL -> step = SealStep.SET_DURATION
+                SealStep.SHOW_RECOVERY_PHRASE -> step = SealStep.CONFIRM_SEAL
+            }
+        }
+        BackHandler(enabled = true, onBack = goBack)
+        PageHeader(title = "Create a seal", onBack = goBack)
         if (!hasSecureLock) {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(10.dp))
                     Text(
                         "Phone Lock Required to Create Seal",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer
+                        color = MaterialTheme.colorScheme.error
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Please set a PIN, pattern, or password in phone settings before creating a seal so your protection stays secure.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text("Set Phone Lock Now", color = MaterialTheme.colorScheme.onError)
-                    }
                 }
+                Text(
+                    "Set a PIN, pattern or password before creating a seal.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+                TextButton(
+                    onClick = { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)) },
+                    contentPadding = PaddingValues(horizontal = 0.dp)
+                ) { Text("Set phone lock") }
             }
         }
 
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                when (step) {
+                    SealStep.SELECT_APPS -> "SELECT APPS"
+                    SealStep.SET_DURATION -> "SET DURATION"
+                    SealStep.CONFIRM_SEAL -> "REVIEW SEAL"
+                    SealStep.SHOW_RECOVERY_PHRASE -> "RECOVERY PHRASE"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = BrassPrimary
+            )
+            Text(
+                "${step.ordinal + 1} of ${SealStep.entries.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        LinearProgressIndicator(
+            progress = { stepProgress },
+            modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(3.dp)),
+            color = BrassPrimary,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+        Spacer(Modifier.height(20.dp))
+
         when (step) {
             SealStep.SELECT_APPS -> {
-                Text("Choose What To Seal", style = MaterialTheme.typography.headlineMedium)
+                Text("Choose what to seal", style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Select up to $MAX_APPS_PER_SEAL apps. Apps already sealed elsewhere are shown locked — use \"Add time\" on their card from Home instead.",
@@ -131,13 +180,14 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                         CircularProgressIndicator(color = BrassPrimary)
                     }
                 } else {
-                    LazyColumn(modifier = Modifier.weight(1f)) {
-                        items(installedApps, key = { it.packageName }) { app ->
+                    SettingsCard(modifier = Modifier.weight(1f)) {
+                        LazyColumn {
+                            items(installedApps, key = { it.packageName }) { app ->
                             val lockedBySeal = sealByPackage[app.packageName]
                             val remainingLabel = remember(lockedBySeal) {
                                 lockedBySeal?.let { VaultManager.remainingLabelFor(context, it) }
                             }
-                            AppRow(
+                                AppRow(
                                 app = app,
                                 checked = app.packageName in selectedPackages,
                                 lockedRemainingLabel = remainingLabel,
@@ -149,10 +199,15 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                                             selectedPackages
                                         }
                                     } else {
+                                        websiteDomains = websiteDomains - app.packageName
                                         selectedPackages - app.packageName
                                     }
                                 }
-                            )
+                                )
+                                if (app != installedApps.last()) {
+                                    HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(start = 72.dp))
+                                }
+                            }
                         }
                     }
                 }
@@ -170,39 +225,153 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
             }
 
             SealStep.SET_DURATION -> {
-                Text("For How Long?", style = MaterialTheme.typography.headlineMedium)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "This seal covers only the ${selectedPackages.size} app(s) you just picked. " +
-                        "Any other seals you have running are untouched.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                ) {
+                    Text("For how long?", style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        "${selectedPackages.size} apps selected",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                Spacer(Modifier.height(32.dp))
-                Text("$durationDays days", style = MaterialTheme.typography.displayLarge, color = BrassPrimary)
-                Slider(
-                    value = durationDays.toFloat(),
-                    onValueChange = { durationDays = it.toInt() },
-                    valueRange = MIN_SEAL_DURATION_DAYS.toFloat()..MAX_SEAL_DURATION_DAYS.toFloat(),
-                    colors = SliderDefaults.colors(thumbColor = BrassPrimary, activeTrackColor = BrassPrimary)
-                )
-                errorMessage?.let {
-                    Spacer(Modifier.height(12.dp))
-                    Text(it, color = EmberRed)
+                    Spacer(Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = !durationInDays,
+                            onClick = {
+                                durationInDays = false
+                                durationAmount = durationAmount.coerceIn(1, 24)
+                            },
+                            label = { Text("Hours") }
+                        )
+                        FilterChip(
+                            selected = durationInDays,
+                            onClick = {
+                                durationInDays = true
+                                durationAmount = durationAmount.coerceIn(1, MAX_SEAL_DURATION_HOURS / 24)
+                            },
+                            label = { Text("Days") }
+                        )
+                    }
+                    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                Text(
+                                    "Duration",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "$durationAmount ${if (durationInDays) "days" else "hours"}",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = BrassPrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Slider(
+                                value = durationAmount.toFloat(),
+                                onValueChange = { durationAmount = it.toInt().coerceAtLeast(1) },
+                                valueRange = 1f..if (durationInDays) {
+                                    (MAX_SEAL_DURATION_HOURS / 24).toFloat()
+                                } else {
+                                    24f
+                                },
+                                colors = SliderDefaults.colors(
+                                    thumbColor = BrassPrimary,
+                                    activeTrackColor = BrassPrimary
+                                )
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("1 ${if (durationInDays) "day" else "hour"}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "${if (durationInDays) MAX_SEAL_DURATION_HOURS / 24 else 24} ${if (durationInDays) "days" else "hours"}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    var showWebsiteInfo by remember { mutableStateOf(false) }
+                    var showWebsiteEditor by remember { mutableStateOf(false) }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Optional website blocks",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Box {
+                            IconButton(onClick = { showWebsiteInfo = true }) {
+                                Icon(Icons.Filled.Info, contentDescription = "Website blocks information", tint = TextSecondary)
+                            }
+                            DropdownMenu(
+                                expanded = showWebsiteInfo,
+                                onDismissRequest = { showWebsiteInfo = false },
+                                modifier = Modifier.widthIn(max = 300.dp)
+                            ) {
+                                Text(
+                                    "Enter a domain and tap Add. The domain and subdomains will be blocked in managed Chrome after sealing.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextSecondary,
+                                    modifier = Modifier.padding(16.dp)
+                                )
+                            }
+                        }
+                        IconButton(onClick = { showWebsiteEditor = !showWebsiteEditor }) {
+                            Icon(
+                                Icons.Filled.KeyboardArrowDown,
+                                contentDescription = if (showWebsiteEditor) "Hide website blocks" else "Show website blocks",
+                                tint = TextSecondary
+                            )
+                        }
+                    }
+                    if (showWebsiteEditor) {
+                        SettingsCard(modifier = Modifier.padding(top = 8.dp)) {
+                            WebsiteDomainsEditor(
+                                apps = selectedPackages.map { packageName ->
+                                    packageName to (installedApps.firstOrNull { it.packageName == packageName }?.label ?: packageName)
+                                }.sortedBy { it.second.lowercase() },
+                                websiteDomains = websiteDomains,
+                                onDomainsChanged = { websiteDomains = it }
+                            )
+                        }
+                    }
+                    errorMessage?.let {
+                        Spacer(Modifier.height(12.dp))
+                        Text(it, color = EmberRed)
+                    }
                 }
-                Spacer(Modifier.weight(1f))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(onClick = { step = SealStep.SELECT_APPS }) { Text("Back") }
                     Button(
-                        enabled = !isSealing,
+                        enabled = !isSealing &&
+                            durationAmount in 1..if (durationInDays) MAX_SEAL_DURATION_HOURS / 24 else 24,
                         onClick = {
                             isSealing = true
                             errorMessage = null
                             coroutineScope.launch {
                                 try {
-                                    val (seal, phrase) = VaultManager.prepareSeal(
-                                        context, selectedPackages, durationDays
-                                    )
+                                    val (seal, phrase) = withContext(Dispatchers.IO) {
+                                        VaultManager.prepareSeal(
+                                            context,
+                                            selectedPackages,
+                                            durationAmount * if (durationInDays) 24 else 1,
+                                            websiteDomains
+                                        )
+                                    }
                                     recoveryPhrase = phrase
                                     pendingSeal = seal
                                     step = SealStep.CONFIRM_SEAL
@@ -230,30 +399,40 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                 } ?: "Unknown"
 
                 Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                    Text("Confirm This Seal", style = MaterialTheme.typography.headlineMedium)
-                    Spacer(Modifier.height(8.dp))
                     Text(
-                        "Review the apps and unlock date carefully. Nothing is blocked until you confirm.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        "Confirm seal ${sealShortId(seal?.id.orEmpty())}",
+                        style = MaterialTheme.typography.headlineMedium
                     )
-                    Spacer(Modifier.height(20.dp))
-                    Text("Apps to block (${appLabels.size})", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            appLabels.forEach { label ->
-                                Text("- $label", color = TextPrimary)
-                                Spacer(Modifier.height(4.dp))
-                            }
+                    Spacer(Modifier.height(16.dp))
+                    SettingsCard {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Protected apps", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(8.dp))
+                        appLabels.forEach { label ->
+                            Text(label, color = TextPrimary, modifier = Modifier.padding(vertical = 6.dp))
+                        }
                         }
                     }
                     Spacer(Modifier.height(20.dp))
-                    Text("Unlock date", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(4.dp))
-                    Text(unlockDate, style = MaterialTheme.typography.titleLarge, color = BrassPrimary)
+                    if (seal?.websiteDomains?.isNotEmpty() == true) {
+                        SettingsCard {
+                            Column(Modifier.padding(16.dp)) {
+                                Text("Website rules", style = MaterialTheme.typography.titleMedium)
+                                Spacer(Modifier.height(8.dp))
+                                seal.websiteDomains.values.flatten().toSet().sorted().forEach { domain ->
+                                    Text(domain, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 4.dp))
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
+                    }
+                    SettingsCard {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Unlock date", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                            Spacer(Modifier.height(4.dp))
+                            Text(unlockDate, style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -271,7 +450,25 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
 
             SealStep.SHOW_RECOVERY_PHRASE -> {
                 Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                    Text("Write This Down Now", style = MaterialTheme.typography.headlineMedium)
+                    val sealId = pendingSeal?.id.orEmpty()
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Filled.Lock, contentDescription = null, tint = TextPrimary)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text("SEAL ${sealShortId(sealId)}", style = MaterialTheme.typography.titleMedium)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Text("Write this down now", style = MaterialTheme.typography.headlineMedium)
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "This is shown only once. It's this seal's only way back in before time is up — " +
@@ -279,15 +476,15 @@ fun SealVaultScreen(onSealed: () -> Unit, onCancel: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(20.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
+                    SettingsCard {
                         Text(
                             recoveryPhrase ?: "",
-                            modifier = Modifier.padding(20.dp),
-                            style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-                            color = BrassPrimary
+                            modifier = Modifier.fillMaxWidth().padding(18.dp),
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 32.sp
+                            ),
+                            color = TextPrimary
                         )
                     }
                     Spacer(Modifier.height(20.dp))
@@ -376,15 +573,7 @@ private fun UserSwitchBlockDialog(
                 )
                 Spacer(Modifier.height(16.dp))
 
-                // Option 1 Card: Block Switching
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(EmberRed.copy(alpha = 0.08f)),
-                    colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.Block,
@@ -401,24 +590,14 @@ private fun UserSwitchBlockDialog(
                         }
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "Disables Guest Mode & secondary profiles while sealed. Prevents all bypasses since Android pauses background enforcement in Guest mode.",
+                            text = "Disables Guest Mode and secondary profiles while sealed.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = TextPrimary.copy(alpha = 0.9f)
+                            color = TextSecondary
                         )
-                    }
+                    HorizontalDivider(color = VaultDivider, modifier = Modifier.padding(top = 12.dp))
                 }
 
-                Spacer(Modifier.height(12.dp))
-
-                // Option 2 Card: Package Freeze Only
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(SteelSurfaceHigh),
-                    colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.Lock,
@@ -435,11 +614,10 @@ private fun UserSwitchBlockDialog(
                         }
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "Freezes apps in existing user accounts, but allows user switching. Note: Fresh Guest sessions may reinstall apps in their clean space.",
+                            text = "Freezes apps in this user account; user switching remains available.",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
-                    }
                 }
             }
         },
@@ -487,6 +665,9 @@ private fun UserSwitchBlockDialog(
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
 private enum class SealStep { SELECT_APPS, SET_DURATION, CONFIRM_SEAL, SHOW_RECOVERY_PHRASE }
+
+private fun sealShortId(sealId: String): String =
+    sealId.replace("-", "").take(8).uppercase(Locale.getDefault())
 
 @Composable
 private fun AppRow(
@@ -538,11 +719,6 @@ private fun AppRow(
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (isLocked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
             )
-            Text(
-                app.packageName,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
 
         if (lockedRemainingLabel != null) {
@@ -566,9 +742,12 @@ object AppRepository {
             val pm = context.packageManager
             val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
             val list = pm.queryIntentActivities(intent, 0)
+                .asSequence()
+                .filter { resolveInfo -> resolveInfo.activityInfo.packageName != context.packageName }
                 .map { resolveInfo ->
-                    val label = resolveInfo.nonLocalizedLabel?.toString()
-                        ?: runCatching { resolveInfo.loadLabel(pm).toString() }.getOrDefault(resolveInfo.activityInfo.packageName)
+                    val label = runCatching {
+                        resolveInfo.loadLabel(pm).toString()
+                    }.getOrDefault(resolveInfo.activityInfo.packageName)
                     InstalledApp(
                         label = label,
                         packageName = resolveInfo.activityInfo.packageName
@@ -577,6 +756,7 @@ object AppRepository {
                 .filter { it.packageName != context.packageName }
                 .distinctBy { it.packageName }
                 .sortedBy { it.label.lowercase() }
+                .toList()
 
             val topPackages = list.take(30).map { it.packageName }
             com.fortress.vault.core.IconCache.preloadIcons(context, topPackages)

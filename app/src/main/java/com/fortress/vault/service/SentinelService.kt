@@ -3,6 +3,7 @@ package com.fortress.vault.service
 import android.app.Notification
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -11,6 +12,9 @@ import com.fortress.vault.MainActivity
 import com.fortress.vault.R
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.core.ControlManager
+import com.fortress.vault.core.WebProtectionLockManager
+import com.fortress.vault.core.AppTimeLimitManager
+import com.fortress.vault.core.AppScheduleManager
 import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,8 +55,16 @@ class SentinelService : Service() {
                 }
 
                 while (true) {
+                    withContext(Dispatchers.IO) {
+                        WebProtectionLockManager.reconcileExpired(applicationContext)
+                    }
                     // Fast in-memory check — reads cachedSeals / cachedLocks, no I/O
-                    if (!VaultManager.isSealed(applicationContext) && ControlManager.activeLocks(applicationContext).isEmpty()) {
+                    if (!VaultManager.isSealed(applicationContext) &&
+                        ControlManager.activeLocks(applicationContext).isEmpty() &&
+                        WebProtectionLockManager.activeLocks(applicationContext).isEmpty() &&
+                        !AppTimeLimitManager.hasActiveWork(applicationContext)
+                        && !AppScheduleManager.isEnabled(applicationContext)
+                    ) {
                         stopSelf()
                         break
                     }
@@ -63,6 +75,8 @@ class SentinelService : Service() {
                     // Runs on IO so it never touches the main thread.
                     withContext(Dispatchers.IO) {
                         ControlManager.enforceNewlyInstalledPackagesIfNeeded(applicationContext)
+                        AppTimeLimitManager.enforce(applicationContext)
+                        AppScheduleManager.enforce(applicationContext)
                     }
 
                     // ── Trusted verification (every 15 min) ───────────────────────
@@ -78,7 +92,10 @@ class SentinelService : Service() {
 
                         // Refresh notification text after enforcement cycle
                         val updatedNotif = withContext(Dispatchers.IO) { buildDynamicNotification() }
-                        runCatching {
+                        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+                            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                            PackageManager.PERMISSION_GRANTED
+                        ) {
                             NotificationManagerCompat.from(applicationContext).notify(NOTIFICATION_ID, updatedNotif)
                         }
                     }

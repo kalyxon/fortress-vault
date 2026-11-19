@@ -7,7 +7,7 @@ import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Shield
@@ -22,6 +22,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.fortress.vault.ui.theme.BrassPrimary
+import com.fortress.vault.ui.components.PageHeader
+import com.fortress.vault.ui.components.SettingsCard
 
 private const val ADB_COMMAND =
     "adb shell dpm set-device-owner com.fortress.vault/.FortressAdminReceiver"
@@ -43,7 +45,8 @@ fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
             .verticalScroll(rememberScrollStateCompat()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(32.dp))
+        PageHeader(title = "Device setup")
+        Spacer(Modifier.height(8.dp))
         Icon(
             imageVector = Icons.Filled.Shield,
             contentDescription = null,
@@ -51,7 +54,7 @@ fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
             modifier = Modifier.size(56.dp)
         )
         Spacer(Modifier.height(16.dp))
-        Text("Before You Seal Anything", style = MaterialTheme.typography.headlineMedium)
+        Text("Before you seal anything", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(
             "Fortress needs Device Owner status to become unremovable. " +
@@ -62,13 +65,15 @@ fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
         )
 
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = orgName,
-            onValueChange = { orgName = it; showOrgNameError = false },
-            label = { Text("Organization name") },
-            placeholder = { Text("Your organization (shown by Android)") },
-            modifier = Modifier.fillMaxWidth()
-        )
+        SettingsCard {
+            OutlinedTextField(
+                value = orgName,
+                onValueChange = { orgName = it; showOrgNameError = false },
+                label = { Text("Organization name") },
+                placeholder = { Text("Your organization (shown by Android)") },
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            )
+        }
         if (showOrgNameError) {
             Spacer(Modifier.height(8.dp))
             Text("Please enter a non-empty organization name.", color = MaterialTheme.colorScheme.error)
@@ -82,39 +87,29 @@ fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
         )
 
         Spacer(Modifier.height(28.dp))
-        SetupStep(
-            number = 1,
-            title = "Factory reset required",
-            description = "Device Owner can only be granted on a device with zero accounts " +
-                "ever added. If you've already signed into Google, you'll need to reset first."
-        )
-        SetupStep(
-            number = 2,
-            title = "Enable USB debugging",
-            description = "Settings → About phone → tap Build number 7 times → Developer " +
-                "options → enable USB debugging. Connect the phone to a computer."
-        )
-        SetupStep(
-            number = 3,
-            title = "Run this command from your computer",
-            description = null
-        )
+        SettingsCard {
+            SetupStep(
+                number = 1,
+                title = "Factory reset required",
+                description = "Device Owner can only be granted on a device with zero accounts ever added."
+            )
+            SetupStep(
+                number = 2,
+                title = "Enable USB debugging",
+                description = "Settings → About phone → tap Build number 7 times → Developer options → enable USB debugging."
+            )
+            SetupStep(number = 3, title = "Run this command from your computer", description = null)
+        }
 
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            shape = RoundedCornerShape(12.dp)
-        ) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
             Row(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     ADB_COMMAND,
                     style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).horizontalScroll(rememberScrollStateCompat())
                 )
                 IconButton(onClick = {
                     clipboard.setText(AnnotatedString(ADB_COMMAND))
@@ -122,6 +117,7 @@ fun SetupScreen(onDeviceOwnerConfirmed: () -> Unit) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = "Copy command", tint = BrassPrimary)
                 }
             }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
         }
 
         SetupStep(

@@ -144,12 +144,32 @@ object ControlManager {
         check(DeviceSecurity.hasSecureLock(context)) {
             "Set a secure phone lock before enabling device controls."
         }
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        check(dpm.isDeviceOwnerApp(context.packageName)) {
+            "Set Fortress Vault as the device owner before enabling device controls."
+        }
+        val previous = activeLocks(context)
         synchronized(lock) {
-            val merged = activeLocks(context).associateBy { it.control }.toMutableMap()
+            val merged = previous.associateBy { it.control }.toMutableMap()
             prepared.locks.forEach { (control, value) -> merged[control] = value }
             save(merged.values.toList())
         }
-        apply(context)
+        try {
+            check(apply(context)) {
+                "Android did not apply the device-control policies. Confirm Fortress is still the device owner and try again."
+            }
+        } catch (error: Exception) {
+            synchronized(lock) { save(previous) }
+            try {
+                apply(context)
+            } catch (rollbackError: Exception) {
+                Log.e("ControlManager", "Could not restore device-control policies after a failed lock", rollbackError)
+            }
+            throw IllegalStateException(
+                error.message ?: "Android could not apply the device-control policies.",
+                error
+            )
+        }
         SentinelController.start(context)
     }
 
@@ -172,6 +192,41 @@ object ControlManager {
     fun remainingMillis(context: Context, lock: ControlLock): Long =
         (lock.unlockAtMillis - TimeKeeper.estimateCurrentTrustedTimeMillis(context)).coerceAtLeast(0)
 
+    fun isAppChangeBlocked(context: Context): Boolean =
+        activeLocks(context).any {
+            it.control == DeviceControl.APP_INSTALLS && remainingMillis(context, it) > 0
+        }
+
+    fun newlyBlockedPackages(context: Context): Set<String> {
+        init(context)
+        return prefs.getStringSet(BLOCKED_NEW_PACKAGES, emptySet()).orEmpty()
+    }
+
+    fun isInInstallBaseline(context: Context, packageName: String): Boolean {
+        init(context)
+        return packageName in prefs.getStringSet(INSTALL_BASELINE_PACKAGES, emptySet()).orEmpty()
+    }
+
+    fun markUnsealedPackagesAsExisting(context: Context, packages: Set<String>) {
+        init(context)
+        if (!isAppChangeBlocked(context)) return
+
+        synchronized(lock) {
+            val restoredPackages = packages - context.packageName
+            if (restoredPackages.isEmpty()) return
+            val baseline = prefs.getStringSet(INSTALL_BASELINE_PACKAGES, emptySet()).orEmpty()
+            val newlyBlocked = prefs.getStringSet(BLOCKED_NEW_PACKAGES, emptySet()).orEmpty()
+            check(
+                prefs.edit()
+                    .putStringSet(INSTALL_BASELINE_PACKAGES, baseline + restoredPackages)
+                    .putStringSet(BLOCKED_NEW_PACKAGES, newlyBlocked - restoredPackages)
+                    .commit()
+            ) {
+                "Could not preserve restored apps while app-install protection is active."
+            }
+        }
+    }
+
     fun rememberNewlyBlockedPackage(context: Context, packageName: String) {
         synchronized(lock) {
             init(context)
@@ -180,9 +235,9 @@ object ControlManager {
         }
     }
 
-    fun apply(context: Context) {
+    fun apply(context: Context): Boolean {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        if (!dpm.isDeviceOwnerApp(context.packageName)) return
+        if (!dpm.isDeviceOwnerApp(context.packageName)) return false
         val admin = FortressAdminReceiver.getComponentName(context)
         val allLocks = activeLocks(context)
         val wasBlockingAppChanges = allLocks.any { it.control == DeviceControl.APP_INSTALLS }
@@ -203,11 +258,12 @@ object ControlManager {
 
         if (!stateChanged && !expiredLocks) {
             // No DPM state change needed — skip all IPC calls
-            return
+            return true
         }
 
-        if (!isBlockingAppChanges) {
-            clearProtectedUninstallPackages(context, dpm, admin)
+        var policiesApplied = true
+        if (!isBlockingAppChanges && !clearProtectedUninstallPackages(context, dpm, admin)) {
+            policiesApplied = false
         }
         if (expiredLocks) {
             synchronized(lock) { save(active) }
@@ -215,7 +271,7 @@ object ControlManager {
         if (wasBlockingAppChanges && !isBlockingAppChanges) {
             val packages = prefs.getStringSet(BLOCKED_NEW_PACKAGES, emptySet()).orEmpty()
             PackageFreezer.unfreezeAll(context, packages - VaultManager.blockedPackages(context))
-            clearProtectedUninstallPackages(context, dpm, admin)
+            if (!clearProtectedUninstallPackages(context, dpm, admin)) policiesApplied = false
             prefs.edit()
                 .remove(BLOCKED_NEW_PACKAGES)
                 .remove(INSTALL_BASELINE_PACKAGES)
@@ -223,53 +279,89 @@ object ControlManager {
         }
         if ((!wasBlockingAppChanges && isBlockingAppChanges) ||
             (isBlockingAppChanges && !prefs.contains(INSTALL_BASELINE_PACKAGES))) {
-            val installed = runCatching {
-                context.packageManager.getInstalledPackages(0).map { it.packageName }.toSet()
-            }.getOrDefault(emptySet())
-            prefs.edit().putStringSet(INSTALL_BASELINE_PACKAGES, installed).apply()
+            val installed = try {
+                context.packageManager.getInstalledPackages(
+                    android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS
+                ).map { it.packageName }.toSet() + VaultManager.blockedPackages(context)
+            } catch (error: Exception) {
+                policiesApplied = false
+                Log.e("ControlManager", "Could not capture the installed-app baseline", error)
+                null
+            }
+            if (installed != null) prefs.edit().putStringSet(INSTALL_BASELINE_PACKAGES, installed).apply()
         }
-        setRestriction(dpm, admin, UserManager.DISALLOW_DEBUGGING_FEATURES, wantsUsbDebugBlock)
-        setRestriction(dpm, admin, UserManager.DISALLOW_ADD_USER, wantsUserAccountsBlock)
-        setRestriction(dpm, admin, UserManager.DISALLOW_USER_SWITCH, wantsUserAccountsBlock)
-        setRestriction(dpm, admin, UserManager.DISALLOW_INSTALL_APPS, fullAppChangeBlock)
-        setRestriction(dpm, admin, UserManager.DISALLOW_UNINSTALL_APPS, fullAppChangeBlock)
+        policiesApplied = setRestriction(
+            dpm, admin, UserManager.DISALLOW_DEBUGGING_FEATURES, wantsUsbDebugBlock
+        ) && policiesApplied
+        policiesApplied = setRestriction(
+            dpm, admin, UserManager.DISALLOW_ADD_USER, wantsUserAccountsBlock
+        ) && policiesApplied
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            policiesApplied = setRestriction(
+                dpm, admin, UserManager.DISALLOW_USER_SWITCH, wantsUserAccountsBlock
+            ) && policiesApplied
+        }
+        policiesApplied = setRestriction(
+            dpm, admin, UserManager.DISALLOW_INSTALL_APPS, fullAppChangeBlock
+        ) && policiesApplied
+        policiesApplied = setRestriction(
+            dpm, admin, UserManager.DISALLOW_UNINSTALL_APPS, fullAppChangeBlock
+        ) && policiesApplied
         if (isBlockingAppChanges && !fullAppChangeBlock) {
-            protectBaselinePackages(context, dpm, admin)
+            if (!protectBaselinePackages(context, dpm, admin)) policiesApplied = false
         }
-        lastAppliedState = desiredState
+        if (policiesApplied) lastAppliedState = desiredState
+        return policiesApplied
     }
 
     private fun protectBaselinePackages(
         context: Context,
         dpm: DevicePolicyManager,
         admin: android.content.ComponentName
-    ) {
+    ): Boolean {
         val baseline = prefs.getStringSet(INSTALL_BASELINE_PACKAGES, emptySet()).orEmpty()
         val protected = prefs.getStringSet(LEGACY_PROTECTED_UNINSTALL_PACKAGES, emptySet()).orEmpty()
         val packagesToProtect = baseline + protected
-        if (packagesToProtect.isEmpty()) return
+        if (packagesToProtect.isEmpty()) return true
 
+        var policiesApplied = true
         packagesToProtect
             .filter { it != context.packageName }
             .forEach { packageName ->
-                runCatching { dpm.setUninstallBlocked(admin, packageName, true) }
+                try {
+                    dpm.setUninstallBlocked(admin, packageName, true)
+                } catch (error: Exception) {
+                    policiesApplied = false
+                    Log.e("ControlManager", "Could not block uninstall for $packageName", error)
+                }
             }
         prefs.edit().putStringSet(LEGACY_PROTECTED_UNINSTALL_PACKAGES, packagesToProtect).apply()
+        return policiesApplied
     }
 
     private fun clearProtectedUninstallPackages(
         context: Context,
         dpm: DevicePolicyManager,
         admin: android.content.ComponentName
-    ) {
+    ): Boolean {
         val protected = prefs.getStringSet(LEGACY_PROTECTED_UNINSTALL_PACKAGES, emptySet()).orEmpty()
         val sealedPackages = VaultManager.blockedPackages(context)
+        val failedRestores = mutableSetOf<String>()
         protected
             .filter { it !in sealedPackages && it != context.packageName }
             .forEach { packageName ->
-                runCatching { dpm.setUninstallBlocked(admin, packageName, false) }
+                try {
+                    dpm.setUninstallBlocked(admin, packageName, false)
+                } catch (error: Exception) {
+                    failedRestores += packageName
+                    Log.e("ControlManager", "Could not restore uninstall for $packageName", error)
+                }
             }
-        prefs.edit().remove(LEGACY_PROTECTED_UNINSTALL_PACKAGES).apply()
+        prefs.edit().apply {
+            if (failedRestores.isEmpty()) remove(LEGACY_PROTECTED_UNINSTALL_PACKAGES)
+            else putStringSet(LEGACY_PROTECTED_UNINSTALL_PACKAGES, failedRestores)
+        }.apply()
+        return failedRestores.isEmpty()
     }
 
     fun enforceNewlyInstalledPackagesIfNeeded(context: Context) {
@@ -281,11 +373,14 @@ object ControlManager {
         val baseline = prefs.getStringSet(INSTALL_BASELINE_PACKAGES, emptySet()).orEmpty()
         if (baseline.isEmpty()) return
         val sealed = VaultManager.blockedPackages(context)
-        val newPackages = runCatching {
+        val newPackages = try {
             context.packageManager.getInstalledPackages(0)
                 .map { it.packageName }
                 .filter { it !in baseline && it !in sealed && it != context.packageName }
-        }.getOrDefault(emptyList())
+        } catch (error: Exception) {
+            Log.e("ControlManager", "Could not check for newly installed apps", error)
+            return
+        }
 
         newPackages.forEach { packageName ->
             PackageFreezer.quarantineNewPackage(context, packageName)
@@ -294,8 +389,20 @@ object ControlManager {
         }
     }
 
-    private fun setRestriction(dpm: DevicePolicyManager, admin: android.content.ComponentName, restriction: String, enabled: Boolean) {
-        if (enabled) dpm.addUserRestriction(admin, restriction) else dpm.clearUserRestriction(admin, restriction)
+    private fun setRestriction(
+        dpm: DevicePolicyManager,
+        admin: android.content.ComponentName,
+        restriction: String,
+        enabled: Boolean
+    ): Boolean {
+        return try {
+            if (enabled) dpm.addUserRestriction(admin, restriction)
+            else dpm.clearUserRestriction(admin, restriction)
+            true
+        } catch (error: Exception) {
+            Log.e("ControlManager", "Could not ${if (enabled) "apply" else "clear"} restriction $restriction", error)
+            false
+        }
     }
 
     private fun save(locks: List<ControlLock>) {

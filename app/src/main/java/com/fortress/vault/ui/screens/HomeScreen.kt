@@ -1,21 +1,37 @@
 package com.fortress.vault.ui.screens
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.foundation.shape.CircleShape
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -33,6 +50,12 @@ import com.fortress.vault.core.VaultManager
 import com.fortress.vault.ui.theme.BrassPrimary
 import com.fortress.vault.ui.theme.CountdownStyle
 import com.fortress.vault.ui.theme.EmberRed
+import com.fortress.vault.ui.components.PageHeader
+import com.fortress.vault.ui.components.SectionLabel
+import com.fortress.vault.ui.components.SettingsCard
+import com.fortress.vault.ui.components.SettingsRow
+import com.fortress.vault.ui.theme.TextPrimary
+import com.fortress.vault.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +73,7 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
     var seals by remember { mutableStateOf(VaultManager.activeSeals(context)) }
     var extendTargetSealId by remember { mutableStateOf<String?>(null) }
     var detailsSealId by remember { mutableStateOf<String?>(null) }
+    var websiteRulesTargetSealId by remember { mutableStateOf<String?>(null) }
     var addAppsTargetSealId by remember { mutableStateOf<String?>(null) }
     var pendingAddedApps by remember { mutableStateOf<Pair<String, Set<String>>?>(null) }
     var pendingExtension by remember { mutableStateOf<Pair<String, Int>?>(null) }
@@ -68,53 +92,103 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
         }
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.End) {
-                IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Device controls") }
+    val detailsSeal = seals.firstOrNull { it.id == detailsSealId }
+    BackHandler(
+        enabled = detailsSeal != null ||
+            websiteRulesTargetSealId != null ||
+            addAppsTargetSealId != null ||
+            pendingAddedApps != null ||
+            extendTargetSealId != null ||
+            pendingExtension != null
+    ) {
+        when {
+            pendingExtension != null -> pendingExtension = null
+            extendTargetSealId != null -> extendTargetSealId = null
+            pendingAddedApps != null -> pendingAddedApps = null
+            addAppsTargetSealId != null -> addAppsTargetSealId = null
+            websiteRulesTargetSealId != null -> {
+                detailsSealId = websiteRulesTargetSealId
+                websiteRulesTargetSealId = null
             }
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onSealVault,
-                containerColor = BrassPrimary,
-                contentColor = MaterialTheme.colorScheme.background,
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("New Seal") }
-            )
+            detailsSeal != null -> detailsSealId = null
         }
-    ) { padding ->
-        if (seals.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
-                Spacer(Modifier.height(16.dp))
-                Text("Nothing sealed right now.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+
+    if (detailsSeal != null) {
+        SealDetailsScreen(
+            seal = detailsSeal,
+            context = context,
+            onDismiss = { detailsSealId = null },
+            onAddApps = { addAppsTargetSealId = detailsSeal.id },
+            onExtend = { extendTargetSealId = detailsSeal.id },
+            onEmergencyUnlock = { onEmergencyUnlock(detailsSeal.id) },
+            onEditWebsites = {
+                websiteRulesTargetSealId = detailsSeal.id
+                detailsSealId = null
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 20.dp),
-                contentPadding = PaddingValues(top = 20.dp, bottom = 96.dp)
-            ) {
-                items(seals, key = { it.id }) { seal ->
-                    SealCard(
-                        seal = seal,
-                        tick = tick,
-                        onTap = { detailsSealId = seal.id },
-                        onExtend = { extendTargetSealId = seal.id },
-                        onEmergencyUnlock = { onEmergencyUnlock(seal.id) }
+        )
+    } else {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                Box(Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp)) {
+                    PageHeader(
+                        title = "Fortress Vault",
+                        action = {
+                            IconButton(onClick = onSettings) {
+                                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     )
+                }
+            },
+            floatingActionButton = {
+                ExtendedFloatingActionButton(
+                    onClick = onSealVault,
+                    containerColor = BrassPrimary,
+                    contentColor = MaterialTheme.colorScheme.background,
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    text = { Text("New Seal") }
+                )
+            }
+        ) { padding ->
+            if (seals.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.height(16.dp))
+                    Text("Nothing sealed right now", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Choose apps to pause distractions and set a time to unlock them.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(horizontal = 20.dp),
+                    contentPadding = PaddingValues(top = 20.dp, bottom = 96.dp)
+                ) {
+                    item {
+                        SectionLabel("Active seals")
+                    }
+                    itemsIndexed(seals, key = { _, seal -> seal.id }) { _, seal ->
+                        SealCard(
+                            seal = seal,
+                            tick = tick,
+                            onTap = { detailsSealId = seal.id }
+                        )
+                    }
                 }
             }
         }
@@ -124,8 +198,8 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
     if (extendTarget != null) {
         ExtendSealDialog(
             onDismiss = { extendTargetSealId = null },
-            onConfirm = { extraDays ->
-                pendingExtension = extendTarget to extraDays
+            onConfirm = { extraHours ->
+                pendingExtension = extendTarget to extraHours
                 extendTargetSealId = null
             }
         )
@@ -137,11 +211,11 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
         if (seal != null) {
             ExtendSealConfirmationDialog(
                 seal = seal,
-                extraDays = extension.second,
+                extraHours = extension.second,
                 onDismiss = { pendingExtension = null },
                 onConfirm = {
                     coroutineScope.launch {
-                        VaultManager.extendSeal(context, seal.id, extension.second)
+                        VaultManager.extendSealByHours(context, seal.id, extension.second)
                         seals = VaultManager.activeSeals(context)
                     }
                     pendingExtension = null
@@ -150,18 +224,31 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
         }
     }
 
-    if (detailsSealId != null) {
-        val detailsSeal = seals.firstOrNull { it.id == detailsSealId }
-        if (detailsSeal != null) {
-            SealDetailDialog(
-                seal = detailsSeal,
-                context = context,
-                onDismiss = { detailsSealId = null },
-                onAddApps = { addAppsTargetSealId = detailsSeal.id }
-            )
-        } else {
-            detailsSealId = null
-        }
+    if (detailsSealId != null && detailsSeal == null) {
+        detailsSealId = null
+    }
+
+    val websiteRulesSeal = seals.firstOrNull { it.id == websiteRulesTargetSealId }
+    if (websiteRulesSeal != null) {
+        WebsiteDomainsDialog(
+            seal = websiteRulesSeal,
+            context = context,
+            onDismiss = { websiteRulesTargetSealId = null },
+            onSave = { domains, onComplete ->
+                coroutineScope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            VaultManager.updateSealWebsiteDomains(context, websiteRulesSeal.id, domains)
+                        }
+                        seals = withContext(Dispatchers.IO) { VaultManager.activeSeals(context) }
+                        onComplete(null)
+                    } catch (error: Exception) {
+                        seals = withContext(Dispatchers.IO) { VaultManager.activeSeals(context) }
+                        onComplete(error.message ?: "Chrome could not apply the website rules.")
+                    }
+                }
+            }
+        )
     }
 
     val addAppsTarget = addAppsTargetSealId
@@ -217,7 +304,11 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
 }
 
 @Composable
-private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> Unit, onEmergencyUnlock: () -> Unit) {
+private fun SealCard(
+    seal: Seal,
+    tick: Long,
+    onTap: () -> Unit
+) {
     val context = LocalContext.current
     // Recompute label when tick changes — driven by single shared 30s loop in HomeScreen,
     // not per-card. This eliminates N parallel LaunchedEffect loops for N seal cards.
@@ -225,48 +316,104 @@ private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> 
         VaultManager.remainingLabelFor(context, seal)
     }
 
-    Card(
+    SettingsCard(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onTap),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp)
+            .padding(vertical = 6.dp)
+            .clickable(onClick = onTap)
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(BrassPrimary.copy(alpha = 0.12f), shape = CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
-                }
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text(remainingLabel, style = CountdownStyle.copy(fontSize = 28.sp), color = BrassPrimary)
-                    Text(
-                        "${seal.packages.size} app${if (seal.packages.size == 1) "" else "s"} sealed",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "SEAL",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary
+                )
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            AnimatedContent(
+                targetState = remainingLabel,
+                transitionSpec = {
+                    fadeIn(tween(120)) togetherWith fadeOut(tween(80))
+                },
+                label = "seal-countdown"
+            ) { label ->
+                val parts = label.split(" ")
+                Row(verticalAlignment = Alignment.Bottom) {
+                    if (parts.size >= 2 && parts[0].endsWith("d") && parts[1].endsWith("h")) {
+                        Text(
+                            parts[0].removeSuffix("d"),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                        Text(
+                            "d",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp, end = 12.dp)
+                        )
+                        Text(
+                            parts[1].removeSuffix("h").removeSuffix("m"),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                        Text(
+                            if (parts[1].endsWith("h")) "h" else "m",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp)
+                        )
+                    } else if (parts.size >= 2 && parts[0].endsWith("h") && parts[1].endsWith("m")) {
+                        Text(
+                            parts[0].removeSuffix("h"),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                        Text(
+                            "h",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp, end = 12.dp)
+                        )
+                        Text(
+                            parts[1].removeSuffix("m"),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                        Text(
+                            "m",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp)
+                        )
+                    } else {
+                        Text(
+                            parts.firstOrNull().orEmpty(),
+                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                            color = TextPrimary
+                        )
+                    }
                 }
             }
-
-            Spacer(Modifier.height(16.dp))
-            AppIconRow(context, seal.packages)
-
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                TextButton(onClick = onExtend) {
-                    Text("Add time", color = BrassPrimary)
-                }
-                TextButton(onClick = onEmergencyUnlock) {
-                    Text("Emergency unlock", color = EmberRed)
-                }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${seal.packages.size} protected app${if (seal.packages.size == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.weight(1f))
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Seal details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -275,18 +422,199 @@ private fun SealCard(seal: Seal, tick: Long, onTap: () -> Unit, onExtend: () -> 
 private data class PackageEntry(val packageName: String, val label: String)
 
 @Composable
-private fun SealDetailDialog(
+private fun SealDetailsScreen(
     seal: Seal,
     context: android.content.Context,
     onDismiss: () -> Unit,
-    onAddApps: () -> Unit
+    onAddApps: () -> Unit,
+    onExtend: () -> Unit,
+    onEmergencyUnlock: () -> Unit,
+    onEditWebsites: () -> Unit
 ) {
     val uniquePackages = remember(seal) { seal.packages.toList().distinct() }
+    var detailTick by remember(seal.id) { mutableLongStateOf(0L) }
+    LaunchedEffect(seal.id) {
+        while (true) {
+            delay(60_000)
+            detailTick = System.currentTimeMillis()
+        }
+    }
+    val remainingLabel = remember(seal.id, detailTick) {
+        VaultManager.remainingLabelFor(context, seal)
+    }
 
-    // Load labels asynchronously on IO to avoid blocking composition thread
     val apps by produceState<List<PackageEntry>>(initialValue = emptyList(), uniquePackages) {
         value = withContext(Dispatchers.IO) {
             uniquePackages.map { packageName ->
+                val label = runCatching {
+                    val appInfo = context.packageManager.getApplicationInfo(
+                        packageName,
+                        android.content.pm.PackageManager.MATCH_UNINSTALLED_PACKAGES
+                    )
+                    context.packageManager.getApplicationLabel(appInfo).toString()
+                }.getOrElse { packageName.toAppDisplayName() }
+                PackageEntry(packageName, label)
+            }.sortedBy { it.label.lowercase() }
+        }
+    }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to seals")
+                }
+                Column {
+                    Text("Seal", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                    Text(sealShortId(seal.id), style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                }
+            }
+        },
+        bottomBar = {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                IconButton(onClick = onAddApps) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add apps")
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onExtend) {
+                    Icon(Icons.Filled.Timer, contentDescription = "Add time")
+                }
+                IconButton(onClick = onEmergencyUnlock) {
+                    Icon(Icons.Filled.LockOpen, contentDescription = "Emergency unlock", tint = EmberRed)
+                }
+            }
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp
+                ) {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+                        Text("Time remaining", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(8.dp))
+                        AnimatedContent(
+                            targetState = remainingLabel,
+                            transitionSpec = {
+                                fadeIn(tween(120)) togetherWith fadeOut(tween(80))
+                            },
+                            label = "detail-countdown"
+                        ) { label ->
+                            Text(label, style = CountdownStyle.copy(fontSize = 38.sp, letterSpacing = 0.sp), color = TextPrimary)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Unlocks ${formatSealDate(seal.unlockAtMillis)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Protected apps", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("${uniquePackages.size}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            if (apps.isEmpty()) {
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = BrassPrimary, strokeWidth = 2.dp)
+                    }
+                }
+            } else {
+                items(apps, key = { it.packageName }) { app ->
+                    val icon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                        initialValue = null,
+                        app.packageName
+                    ) {
+                        value = com.fortress.vault.core.IconCache.getIconAsync(context, app.packageName)
+                    }
+                    val domains = seal.websiteDomains[app.packageName].orEmpty().sorted()
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            icon?.let { appIcon ->
+                                Image(bitmap = appIcon, contentDescription = null, modifier = Modifier.size(38.dp).clip(RoundedCornerShape(8.dp)))
+                            } ?: Icon(Icons.Filled.Lock, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(app.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                                if (domains.isNotEmpty()) {
+                                    Text(
+                                        domains.joinToString(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                    }
+                }
+            }
+
+            item {
+                val websiteRuleCount = seal.websiteDomains.values.sumOf { it.size }
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onEditWebsites).padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Language, contentDescription = null, tint = BrassPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        if (websiteRuleCount == 0) "Add website rules" else "Website rules · $websiteRuleCount",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "Edit website rules", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebsiteDomainsDialog(
+    seal: Seal,
+    context: android.content.Context,
+    onDismiss: () -> Unit,
+    onSave: (Map<String, Set<String>>, (String?) -> Unit) -> Unit
+) {
+    var domains by remember(seal.id) { mutableStateOf(seal.websiteDomains) }
+    var saving by remember(seal.id) { mutableStateOf(false) }
+    var errorMessage by remember(seal.id) { mutableStateOf<String?>(null) }
+    BackHandler(enabled = true) { if (!saving) onDismiss() }
+    val apps by produceState<List<PackageEntry>>(initialValue = emptyList(), seal.id) {
+        value = withContext(Dispatchers.IO) {
+            seal.packages.map { packageName ->
                 val label = runCatching {
                     val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
                     context.packageManager.getApplicationLabel(appInfo).toString()
@@ -296,64 +624,46 @@ private fun SealDetailDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Seal details") },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    "This seal is blocking ${seal.packages.size} app${if (seal.packages.size == 1) "" else "s"}.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(Modifier.height(12.dp))
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+            PageHeader(title = "Website rules", onBack = { if (!saving) onDismiss() })
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 if (apps.isEmpty()) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.CenterHorizontally).size(24.dp),
-                        color = BrassPrimary,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                        items(apps, key = { it.packageName }) { app ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val icon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, app.packageName) {
-                                    value = com.fortress.vault.core.IconCache.getIconAsync(context, app.packageName)
-                                }
-                                val currentIcon = icon
-                                if (currentIcon != null) {
-                                    Image(
-                                        bitmap = currentIcon,
-                                        contentDescription = app.label,
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(app.label, style = MaterialTheme.typography.bodyLarge)
-                                    Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
+                    Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = BrassPrimary, strokeWidth = 2.dp)
                     }
+                } else {
+                    WebsiteDomainsEditor(
+                        apps = apps.map { it.packageName to it.label },
+                        websiteDomains = domains,
+                        allowRemove = true,
+                        onDomainsChanged = { domains = it }
+                    )
+                }
+                errorMessage?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
                 }
             }
-        },
-        confirmButton = {
-            Row {
-                TextButton(onClick = onAddApps) { Text("Add apps", color = BrassPrimary) }
-                TextButton(onClick = onDismiss) { Text("Close", color = BrassPrimary) }
+            Button(
+                enabled = apps.isNotEmpty() && !saving,
+                onClick = {
+                    saving = true
+                    errorMessage = null
+                    onSave(domains) { error ->
+                        saving = false
+                        if (error == null) onDismiss() else errorMessage = error
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
+            ) {
+                Text(if (saving) "Applying..." else "Save websites", color = MaterialTheme.colorScheme.background)
             }
         }
-    )
+    }
 }
 
 @Composable
@@ -372,6 +682,7 @@ private fun AddAppsToSealDialog(
     }
     val candidates = remember(allApps, existingPackages) { allApps.filter { it.packageName !in existingPackages } }
     val selected = remember { mutableStateOf(setOf<String>()) }
+    BackHandler(enabled = true) { onDismiss() }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -438,6 +749,7 @@ private fun AddAppsConfirmationDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
+    BackHandler(enabled = true) { onDismiss() }
     // Load labels asynchronously — previously done synchronously on composition thread
     val labels by produceState<List<String>>(initialValue = emptyList(), packageNames) {
         value = withContext(Dispatchers.IO) {
@@ -491,103 +803,140 @@ private fun AddAppsConfirmationDialog(
 }
 
 @Composable
-private fun AppIconRow(context: android.content.Context, packages: Set<String>) {
-    val uniquePackages = remember(packages) { packages.toList().distinct() }
-    Row {
-        uniquePackages.take(8).forEach { pkg ->
-            val icon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, pkg) {
-                value = com.fortress.vault.core.IconCache.getIconAsync(context, pkg)
+private fun ExtendSealDialog(onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
+    var mode by remember { mutableStateOf(AddTimeMode.HOURS) }
+    BackHandler(enabled = true) { onDismiss() }
+    var extraHours by remember { mutableIntStateOf(24) }
+    var extraDays by remember { mutableIntStateOf(1) }
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+            PageHeader(title = "Add time", onBack = onDismiss)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = mode == AddTimeMode.HOURS,
+                        onClick = { mode = AddTimeMode.HOURS },
+                        label = { Text("Hours") }
+                    )
+                    FilterChip(
+                        selected = mode == AddTimeMode.DAYS,
+                        onClick = { mode = AddTimeMode.DAYS },
+                        label = { Text("Days") }
+                    )
+                }
+                SettingsCard {
+                    Column(Modifier.padding(20.dp)) {
+                        Text(
+                            "+" + if (mode == AddTimeMode.HOURS) formatDuration(extraHours)
+                            else formatDuration(extraDays * 24),
+                            style = MaterialTheme.typography.displaySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(20.dp))
+                        if (mode == AddTimeMode.HOURS) {
+                            Slider(
+                                value = extraHours.toFloat(),
+                                onValueChange = { extraHours = it.toInt().coerceIn(1, 24) },
+                                valueRange = 1f..24f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = BrassPrimary,
+                                    activeTrackColor = BrassPrimary
+                                )
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("1 hour", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("24 hours", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        } else {
+                            Slider(
+                                value = extraDays.toFloat(),
+                                onValueChange = { extraDays = it.toInt().coerceIn(1, 365) },
+                                valueRange = 1f..365f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = BrassPrimary,
+                                    activeTrackColor = BrassPrimary
+                                )
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("1 day", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("365 days", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
             }
-            if (icon != null) {
-                Image(
-                    bitmap = icon!!,
-                    contentDescription = pkg,
-                    modifier = Modifier
-                        .padding(end = 8.dp)
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-            }
-        }
-        if (uniquePackages.size > 8) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
+            Button(
+                onClick = {
+                    onConfirm(if (mode == AddTimeMode.HOURS) extraHours else extraDays * 24)
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
             ) {
-                Text("+${uniquePackages.size - 8}", style = MaterialTheme.typography.bodyMedium)
+                Text("Continue", color = MaterialTheme.colorScheme.background)
             }
         }
     }
 }
 
 @Composable
-private fun ExtendSealDialog(onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
-    var extraDays by remember { mutableStateOf(7) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add time to this seal") },
-        text = {
-            Column {
-                Text("+$extraDays days", style = MaterialTheme.typography.headlineMedium, color = BrassPrimary)
-                Slider(
-                    value = extraDays.toFloat(),
-                    onValueChange = { extraDays = it.toInt() },
-                    valueRange = MIN_SEAL_DURATION_DAYS.toFloat()..MAX_SEAL_DURATION_DAYS.toFloat(),
-                    colors = SliderDefaults.colors(thumbColor = BrassPrimary, activeTrackColor = BrassPrimary)
-                )
-                Text(
-                    "This only extends the countdown — the seal can't be shortened, only lengthened.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(extraDays) }) { Text("Add time", color = BrassPrimary) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-@Composable
 private fun ExtendSealConfirmationDialog(
     seal: Seal,
-    extraDays: Int,
+    extraHours: Int,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    val newUnlockAt = seal.unlockAtMillis + TimeUnit.DAYS.toMillis(extraDays.toLong())
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Confirm added time") },
-        text = {
-            Column {
-                Text("Add $extraDays day${if (extraDays == 1) "" else "s"} to this seal?")
-                Spacer(Modifier.height(12.dp))
-                Text("Current unlock date: ${formatSealDate(seal.unlockAtMillis)}")
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "New unlock date: ${formatSealDate(newUnlockAt)}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = BrassPrimary
-                )
+    val newUnlockAt = seal.unlockAtMillis + TimeUnit.HOURS.toMillis(extraHours.toLong())
+    BackHandler(enabled = true) { onDismiss() }
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+            PageHeader(title = "Confirm added time", onBack = onDismiss)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsCard {
+                    Column(Modifier.padding(18.dp)) {
+                        Text("Current unlock", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(formatSealDate(seal.unlockAtMillis), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                SettingsCard {
+                    Column(Modifier.padding(18.dp)) {
+                        Text("New unlock", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(formatSealDate(newUnlockAt), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Confirm added time", color = BrassPrimary) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Back") }
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
+            ) {
+                Text("Confirm added time", color = MaterialTheme.colorScheme.background)
+            }
         }
-    )
+    }
 }
 
 private fun formatSealDate(epochMillis: Long): String =
-    SimpleDateFormat("EEE, d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(epochMillis))
+    SimpleDateFormat("d MMM · HH:mm", Locale.getDefault()).format(Date(epochMillis))
+
+private fun sealShortId(sealId: String): String =
+    "ID " + sealId.replace("-", "").take(8).uppercase(Locale.getDefault())
+
+private fun formatDuration(totalHours: Int): String {
+    if (totalHours < 24) return "$totalHours hour${if (totalHours == 1) "" else "s"}"
+    val days = totalHours / 24
+    val hours = totalHours % 24
+    return if (hours == 0) "$days day${if (days == 1) "" else "s"}"
+    else "$days d $hours h"
+}
+
+private enum class AddTimeMode { HOURS, DAYS }
+
+private fun String.toAppDisplayName(): String {
+    val ignoredSegments = setOf("android", "app", "mobile", "client", "lite")
+    val name = split('.').lastOrNull { it.isNotBlank() && it.lowercase() !in ignoredSegments }
+        ?: substringAfterLast('.')
+    return name
+        .replace(Regex("([a-z])([A-Z])"), "$1 $2")
+        .replace('_', ' ')
+        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+}

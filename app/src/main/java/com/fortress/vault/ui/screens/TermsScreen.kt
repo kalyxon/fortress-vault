@@ -3,7 +3,6 @@ package com.fortress.vault.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,6 +13,8 @@ import androidx.compose.ui.unit.dp
 import com.fortress.vault.core.OnboardingPrefs
 import com.fortress.vault.ui.theme.BrassPrimary
 import com.fortress.vault.ui.theme.EmberRed
+import com.fortress.vault.ui.components.PageHeader
+import com.fortress.vault.ui.components.SettingsCard
 
 @Composable
 fun TermsScreen(onAccepted: () -> Unit) {
@@ -31,8 +32,9 @@ fun TermsScreen(onAccepted: () -> Unit) {
             .background(MaterialTheme.colorScheme.background)
             .padding(24.dp)
     ) {
+        PageHeader(title = "Before you begin")
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Text("Before You Begin", style = MaterialTheme.typography.headlineMedium, color = EmberRed)
+            Text("Read this carefully", style = MaterialTheme.typography.headlineMedium, color = EmberRed)
             Spacer(Modifier.height(16.dp))
 
             WarningBlock(
@@ -114,14 +116,8 @@ fun TermsScreen(onAccepted: () -> Unit) {
 
 @Composable
 private fun WarningBlock(title: String, body: String) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(14.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    SettingsCard(modifier = Modifier.padding(vertical = 6.dp)) {
+        Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(6.dp))
             Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

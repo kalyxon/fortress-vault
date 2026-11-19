@@ -52,7 +52,7 @@ jobs:
       - name: Prepare APK Artifact
         run: |
           mkdir -p output
-          VERSION_TAG=${GITHUB_REF_NAME:-v1.2.0}
+          VERSION_TAG=${GITHUB_REF_NAME:-v1.3.0}
           cp app/build/outputs/apk/release/app-release.apk output/FortressVault-${VERSION_TAG}.apk || cp app/build/outputs/apk/release/*.apk output/FortressVault-${VERSION_TAG}.apk
 
       - name: Upload APK Build Artifact
