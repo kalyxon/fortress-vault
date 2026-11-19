@@ -12,7 +12,9 @@ enum class WebProtectionSetting(val key: String, val title: String) {
     CHROME_ONLY("chrome_only", "Allow only Chrome and block VPNs"),
     SEALED_APP_WEBSITES("sealed_app_websites", "Block websites for sealed apps"),
     CHROME_INCOGNITO("chrome_incognito", "Disable Chrome Incognito"),
-    APP_TIME_LIMITS("app_time_limits", "Daily app time limits")
+    APP_TIME_LIMITS("app_time_limits", "Daily app time limits"),
+    APP_SCHEDULE("app_schedule", "App time scheduler"),
+    REELS_BLOCKER("reels_blocker", "Reels & Shorts blocker")
 }
 
 data class WebProtectionLock(

@@ -179,6 +179,8 @@ object WebProtectionManager {
             WebProtectionSetting.SEALED_APP_WEBSITES -> blockSealedAppSites(context)
             WebProtectionSetting.CHROME_INCOGNITO -> blockChromeIncognito(context)
             WebProtectionSetting.APP_TIME_LIMITS -> AppTimeLimitManager.isEnabled(context)
+            WebProtectionSetting.APP_SCHEDULE -> AppScheduleManager.isEnabled(context)
+            WebProtectionSetting.REELS_BLOCKER -> ReelsBlockerManager.isEnabled(context)
         }
 
     fun setBlockChromeIncognito(context: Context, enabled: Boolean): Boolean {

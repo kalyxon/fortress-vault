@@ -2,6 +2,7 @@ package com.fortress.vault.ui.screens
 
 import android.app.admin.DevicePolicyManager
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -32,9 +33,12 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +53,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.fortress.vault.core.ControlManager
 import com.fortress.vault.core.AppTimeLimitManager
+import com.fortress.vault.core.AppSchedule
+import com.fortress.vault.core.AppScheduleManager
+import com.fortress.vault.core.ReelsBlockerManager
 import com.fortress.vault.core.DailyAppLimit
 import com.fortress.vault.core.DeviceControl
 import com.fortress.vault.core.PreparedControls
@@ -94,6 +101,9 @@ private data class LoadedWebSettings(
 private enum class SettingsSection(val title: String, val description: String, val icon: ImageVector) {
     WEB_PROTECTION("Web protection", "Filters, browser access and Incognito", Icons.Filled.Shield),
     APP_LIMITS("App time limits", "Daily allowances for selected apps", Icons.Filled.Timer),
+    APP_SCHEDULE("App time scheduler", "Set when selected apps can be used", Icons.Filled.Schedule),
+    // FUTURE/EXPERIMENTAL: Keep this section enum entry for saved-state compatibility.
+    REELS_BLOCKER("Reels blocker", "Block Instagram, Snapchat and YouTube reels", Icons.Filled.PlayCircle),
     DEVICE_CONTROLS("Device controls", "System settings and app changes", Icons.Filled.Tune)
 }
 
@@ -125,7 +135,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
                 Spacer(Modifier.height(18.dp))
                 SettingsGroupCard(
-                    items = listOf(SettingsSection.WEB_PROTECTION, SettingsSection.APP_LIMITS),
+                    items = listOf(
+                        SettingsSection.WEB_PROTECTION,
+                        SettingsSection.APP_LIMITS,
+                        SettingsSection.APP_SCHEDULE
+                    ),
                     onSelect = { section = it }
                 )
                 Spacer(Modifier.height(16.dp))
@@ -204,6 +218,7 @@ private fun SettingsGroupCard(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -241,6 +256,19 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
     var limitMinutesInput by remember { mutableStateOf("10") }
     var appTimeUsage by remember { mutableStateOf(emptyMap<String, Long>()) }
     var launchableApps by remember { mutableStateOf(emptyList<InstalledApp>()) }
+    var appSchedules by remember { mutableStateOf(emptyList<AppSchedule>()) }
+    var appScheduleEnabled by remember { mutableStateOf(false) }
+    var appScheduleError by remember { mutableStateOf<String?>(null) }
+    var showSchedulePicker by remember { mutableStateOf(false) }
+    var scheduleEditorApp by remember { mutableStateOf<InstalledApp?>(null) }
+    var scheduleStartInput by remember { mutableStateOf("08:00") }
+    var scheduleEndInput by remember { mutableStateOf("22:00") }
+    var showStartTimePicker by remember { mutableStateOf(false) }
+    var showEndTimePicker by remember { mutableStateOf(false) }
+    var reelsBlockerEnabled by remember { mutableStateOf(false) }
+    var reelsBlockedPackages by remember {
+        mutableStateOf(ReelsBlockerManager.blockedPackages(context))
+    }
     var webProtectionError by remember { mutableStateOf<String?>(null) }
     var webProtectionBusy by remember { mutableStateOf(false) }
     var isDeviceOwner by remember { mutableStateOf(false) }
@@ -270,16 +298,27 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
             showAdultDomainReview ||
             showAppPicker ||
             limitEditorApp != null ||
+            showSchedulePicker ||
+            scheduleEditorApp != null ||
+            showStartTimePicker ||
+            showEndTimePicker ||
             preparedWebLock != null ||
             webUnlockTarget != null ||
             unlockTarget != null
     ) {
         when {
+            showEndTimePicker -> showEndTimePicker = false
+            showStartTimePicker -> showStartTimePicker = false
             preparedWebLock != null -> {
                 preparedWebLock = null
                 webLockKeySaved = false
             }
             webUnlockTarget != null -> webUnlockTarget = null
+            scheduleEditorApp != null -> scheduleEditorApp = null
+            showSchedulePicker -> {
+                showSchedulePicker = false
+                appPickerQuery = ""
+            }
             limitEditorApp != null -> limitEditorApp = null
             showAppPicker -> {
                 showAppPicker = false
@@ -368,6 +407,12 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
             appLimits = withContext(Dispatchers.IO) { AppTimeLimitManager.limits(context) }
             usageAccessGranted = withContext(Dispatchers.IO) { AppTimeLimitManager.hasUsageAccess(context) }
             appTimeError = withContext(Dispatchers.IO) { AppTimeLimitManager.enforcementError(context) }
+            appSchedules = withContext(Dispatchers.IO) { AppScheduleManager.schedules(context) }
+            appScheduleEnabled = withContext(Dispatchers.IO) { AppScheduleManager.isEnabled(context) }
+            reelsBlockerEnabled = withContext(Dispatchers.IO) { ReelsBlockerManager.isEnabled(context) }
+            reelsBlockedPackages = withContext(Dispatchers.IO) {
+                ReelsBlockerManager.blockedPackages(context)
+            }
             if (settings.isDeviceOwner && !settings.chromePolicyApplied) {
                 webProtectionError =
                     "Android did not confirm Chrome's website/Incognito policy. Restart Chrome; if Incognito is still available, check chrome://policy for IncognitoModeAvailability and URLBlocklist."
@@ -423,6 +468,18 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                         } catch (failure: Exception) {
                             false to (failure.message ?: "Could not change daily app time limits.")
                         }
+                        WebProtectionSetting.APP_SCHEDULE -> try {
+                            AppScheduleManager.setEnabled(context, enabled)
+                            true to null
+                        } catch (failure: Exception) {
+                            false to (failure.message ?: "Could not change App Time Scheduler.")
+                        }
+                        WebProtectionSetting.REELS_BLOCKER -> try {
+                            ReelsBlockerManager.setEnabled(context, enabled)
+                            true to null
+                        } catch (failure: Exception) {
+                            false to (failure.message ?: "Could not change Reels & Shorts blocker.")
+                        }
                     }
 
                 }
@@ -430,6 +487,16 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                     if (setting == WebProtectionSetting.APP_TIME_LIMITS) {
                         appTimeLimitsEnabled = withContext(Dispatchers.IO) {
                             AppTimeLimitManager.isEnabled(context)
+                        }
+                    }
+                    if (setting == WebProtectionSetting.APP_SCHEDULE) {
+                        appScheduleEnabled = withContext(Dispatchers.IO) {
+                            AppScheduleManager.isEnabled(context)
+                        }
+                    }
+                    if (setting == WebProtectionSetting.REELS_BLOCKER) {
+                        reelsBlockerEnabled = withContext(Dispatchers.IO) {
+                            ReelsBlockerManager.isEnabled(context)
                         }
                     }
                     webProtectionError = failureMessage ?: when (setting) {
@@ -443,6 +510,10 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                             "Android could not update Chrome's Incognito policy. Check device-owner status and Chrome."
                         WebProtectionSetting.APP_TIME_LIMITS ->
                             "Could not enable daily app time limits."
+                        WebProtectionSetting.APP_SCHEDULE ->
+                            "Could not enable App Time Scheduler."
+                        WebProtectionSetting.REELS_BLOCKER ->
+                            "Could not enable Reels & Shorts blocker."
                     }
                 } else {
                     when (setting) {
@@ -453,6 +524,13 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                         WebProtectionSetting.APP_TIME_LIMITS -> {
                             appTimeLimitsEnabled = enabled
                             appTimeError = null
+                        }
+                        WebProtectionSetting.APP_SCHEDULE -> {
+                            appScheduleEnabled = enabled
+                            appScheduleError = null
+                        }
+                        WebProtectionSetting.REELS_BLOCKER -> {
+                            reelsBlockerEnabled = enabled
                         }
                     }
                 }
@@ -478,8 +556,50 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
         }
     }
 
+    fun saveAppSchedule(packageName: String, startMinute: Int, endMinute: Int) {
+        scope.launch {
+            appScheduleError = null
+            try {
+                withContext(Dispatchers.IO) {
+                    AppScheduleManager.setSchedule(
+                        context,
+                        AppSchedule(packageName, startMinute, endMinute, appScheduleEnabled)
+                    )
+                }
+                appSchedules = withContext(Dispatchers.IO) { AppScheduleManager.schedules(context) }
+            } catch (failure: Exception) {
+                appScheduleError = failure.message ?: "Could not save this app schedule."
+            }
+        }
+    }
+
+    fun removeAppSchedule(packageName: String) {
+        scope.launch {
+            appScheduleError = null
+            try {
+                withContext(Dispatchers.IO) { AppScheduleManager.removeSchedule(context, packageName) }
+                appSchedules = withContext(Dispatchers.IO) { AppScheduleManager.schedules(context) }
+            } catch (failure: Exception) {
+                appScheduleError = failure.message ?: "Could not remove this app schedule."
+            }
+        }
+    }
+
     LaunchedEffect(showAppPicker) {
         if (showAppPicker) {
+            launchableApps = withContext(Dispatchers.IO) { loadLaunchableApps(context) }
+        }
+    }
+
+    LaunchedEffect(showSchedulePicker) {
+        if (showSchedulePicker) {
+            AppRepository.invalidateCache()
+            launchableApps = withContext(Dispatchers.IO) { loadLaunchableApps(context) }
+        }
+    }
+
+    LaunchedEffect(appSchedules) {
+        if (appSchedules.isNotEmpty() && launchableApps.isEmpty()) {
             launchableApps = withContext(Dispatchers.IO) { loadLaunchableApps(context) }
         }
     }
@@ -576,6 +696,16 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                     WebProtectionUnlockResult.UNLOCKED -> {
                         webLocks = withContext(Dispatchers.IO) {
                             WebProtectionLockManager.activeLocks(context)
+                        }
+                        if (setting == WebProtectionSetting.APP_SCHEDULE) {
+                            appSchedules = withContext(Dispatchers.IO) { AppScheduleManager.schedules(context) }
+                            appScheduleEnabled = withContext(Dispatchers.IO) { AppScheduleManager.isEnabled(context) }
+                        }
+                        if (setting == WebProtectionSetting.REELS_BLOCKER) {
+                            reelsBlockerEnabled = withContext(Dispatchers.IO) { ReelsBlockerManager.isEnabled(context) }
+                            reelsBlockedPackages = withContext(Dispatchers.IO) {
+                                ReelsBlockerManager.blockedPackages(context)
+                            }
                         }
                         webUnlockTarget = null
                         webRecoveryPhrase = ""
@@ -923,11 +1053,11 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                         val appName = launchableApps.firstOrNull { it.packageName == limit.packageName }?.label
                             ?: limit.packageName
                         val usedMillis = appTimeUsage[limit.packageName] ?: 0L
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        SettingsCard(modifier = Modifier.padding(bottom = 10.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                             val appIcon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
                                 initialValue = null,
                                 key1 = limit.packageName
@@ -941,9 +1071,17 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                                     modifier = Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
                                 )
                                 Spacer(Modifier.width(14.dp))
+                            } else {
+                                Box(
+                                    Modifier
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                )
+                                Spacer(Modifier.width(14.dp))
                             }
                             Column(Modifier.weight(1f)) {
-                                Text(appName, style = MaterialTheme.typography.bodyLarge)
+                                Text(appName, style = MaterialTheme.typography.titleMedium)
                                 Text(
                                     "${(usedMillis / 60_000L).coerceAtMost(limit.limitMinutes.toLong())} / ${limit.limitMinutes} min today",
                                     style = MaterialTheme.typography.bodyMedium,
@@ -961,6 +1099,7 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                                 enabled = WebProtectionSetting.APP_TIME_LIMITS !in webLocks,
                                 onClick = { saveAppLimit(limit.packageName, null) }
                             ) { Text("Remove") }
+                            }
                         }
                     }
                     appTimeError?.let {
@@ -969,6 +1108,177 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                     webProtectionError?.let {
                         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     }
+                }
+            }
+            if (section == SettingsSection.APP_SCHEDULE) item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    WebProtectionSettingCard(
+                        title = "App time scheduler",
+                        summary = "Suspend apps outside their allowed hours",
+                        checked = appScheduleEnabled,
+                        locked = WebProtectionSetting.APP_SCHEDULE in webLocks,
+                        enabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
+                        onCheckedChange = { changeWebSetting(WebProtectionSetting.APP_SCHEDULE, it) },
+                        onOpenDetails = { webDetailsTarget = WebProtectionSetting.APP_SCHEDULE }
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Scheduled apps", style = MaterialTheme.typography.titleMedium)
+                        TextButton(
+                            enabled = WebProtectionSetting.APP_SCHEDULE !in webLocks,
+                            onClick = {
+                                appPickerQuery = ""
+                                appScheduleError = null
+                                showSchedulePicker = true
+                            }
+                        ) { Text("Add app") }
+                    }
+                    appSchedules.forEach { schedule ->
+                        val appName = launchableApps.firstOrNull {
+                            it.packageName == schedule.packageName
+                        }?.label ?: schedule.packageName
+                        SettingsCard {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val appIcon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                                    initialValue = null,
+                                    key1 = schedule.packageName
+                                ) {
+                                    value = com.fortress.vault.core.IconCache.getIconAsync(context, schedule.packageName)
+                                }
+                                if (appIcon != null) {
+                                    Image(
+                                        bitmap = appIcon!!,
+                                        contentDescription = appName,
+                                        modifier = Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(appName, style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        "${formatTimeOfDay(schedule.startMinute)} – ${formatTimeOfDay(schedule.endMinute)}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = TextSecondary
+                                    )
+                                }
+                                TextButton(
+                                    enabled = WebProtectionSetting.APP_SCHEDULE !in webLocks,
+                                    onClick = {
+                                        scheduleStartInput = formatTimeOfDay(schedule.startMinute)
+                                        scheduleEndInput = formatTimeOfDay(schedule.endMinute)
+                                        scheduleEditorApp = InstalledApp(appName, schedule.packageName)
+                                    }
+                                ) { Text("Edit") }
+                                TextButton(
+                                    enabled = WebProtectionSetting.APP_SCHEDULE !in webLocks,
+                                    onClick = { removeAppSchedule(schedule.packageName) }
+                                ) {
+                                    Text("Remove")
+                                }
+                            }
+                        }
+                    }
+                    appScheduleError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+            if (section == SettingsSection.REELS_BLOCKER) item {
+                val accessibilityEnabled = remember {
+                    Settings.Secure.getString(
+                        context.contentResolver,
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                    )?.contains(context.packageName + "/.service.ReelsBlockerAccessibilityService") == true
+                }
+                val overlayEnabled = Settings.canDrawOverlays(context)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    WebProtectionSettingCard(
+                        title = "Reels & Shorts blocker",
+                        summary = "Blocks only Reels and Shorts while other app content remains available",
+                        checked = reelsBlockerEnabled,
+                        locked = WebProtectionSetting.REELS_BLOCKER in webLocks,
+                        enabled = webLocksLoaded && !webProtectionBusy,
+                        onCheckedChange = { changeWebSetting(WebProtectionSetting.REELS_BLOCKER, it) },
+                        onOpenDetails = { webDetailsTarget = WebProtectionSetting.REELS_BLOCKER }
+                    )
+                    if (!accessibilityEnabled || !overlayEnabled) {
+                        SettingsCard {
+                            Column(Modifier.padding(16.dp)) {
+                                Text(
+                                    "Android permissions required",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    "Enable Accessibility for Fortress Vault and allow Display over other apps.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextSecondary
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("Open Accessibility") }
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        context.startActivity(
+                                            Intent(
+                                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                Uri.parse("package:${context.packageName}")
+                                            )
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("Allow overlay") }
+                            }
+                        }
+                    }
+                    val reelApps = listOf(
+                        "Instagram" to "com.instagram.android",
+                        "Snapchat" to "com.snapchat.android",
+                        "YouTube" to "com.google.android.youtube"
+                    )
+                    SettingsCard {
+                        Column {
+                            reelApps.forEachIndexed { index, (name, packageName) ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(name, modifier = Modifier.weight(1f))
+                                    Checkbox(
+                                        checked = packageName in reelsBlockedPackages,
+                                        enabled = WebProtectionSetting.REELS_BLOCKER !in webLocks,
+                                        onCheckedChange = { checked ->
+                                            ReelsBlockerManager.setBlockedPackage(
+                                                context,
+                                                packageName,
+                                                checked
+                                            )
+                                            reelsBlockedPackages =
+                                                ReelsBlockerManager.blockedPackages(context)
+                                        }
+                                    )
+                                }
+                                if (index < reelApps.lastIndex) {
+                                    HorizontalDivider(color = VaultDivider)
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        "Detection depends on app text and accessibility data. After an app update, some routes may require the app to be updated.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
                 }
             }
             if (section == SettingsSection.DEVICE_CONTROLS) items(DeviceControl.entries, key = { it.key }) { control ->
@@ -1103,6 +1413,8 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
             WebProtectionSetting.SEALED_APP_WEBSITES -> blockSealedAppSites
             WebProtectionSetting.CHROME_INCOGNITO -> blockChromeIncognito
             WebProtectionSetting.APP_TIME_LIMITS -> appTimeLimitsEnabled
+            WebProtectionSetting.APP_SCHEDULE -> appScheduleEnabled
+            WebProtectionSetting.REELS_BLOCKER -> reelsBlockerEnabled
         },
         locked = setting in webLocks,
         controlsEnabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
@@ -1371,20 +1683,49 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                         SettingsCard(modifier = Modifier.weight(1f)) {
                             LazyColumn {
                                 items(candidates, key = { it.packageName }) { app ->
-                                    TextButton(
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                                        onClick = {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
                                             showAppPicker = false
                                             appPickerQuery = ""
                                             limitMinutesInput = "10"
                                             limitEditorApp = app
                                         }
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        val appIcon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                                            initialValue = null,
+                                            key1 = app.packageName
+                                        ) {
+                                            value = com.fortress.vault.core.IconCache.getIconAsync(context, app.packageName)
+                                        }
+                                        if (appIcon != null) {
+                                            Image(
+                                                bitmap = appIcon!!,
+                                                contentDescription = app.label,
+                                                modifier = Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
+                                            )
+                                        } else {
+                                            Box(
+                                                Modifier
+                                                    .size(42.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            )
+                                        }
+                                        Spacer(Modifier.width(14.dp))
                                         Text(
                                             app.label,
-                                            modifier = Modifier.fillMaxWidth(),
+                                            modifier = Modifier.weight(1f),
                                             style = MaterialTheme.typography.titleMedium,
                                             color = TextPrimary
+                                        )
+                                        Icon(
+                                            Icons.Filled.ChevronRight,
+                                            contentDescription = null,
+                                            tint = TextSecondary
                                         )
                                     }
                                 }
@@ -1394,6 +1735,202 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (showSchedulePicker) {
+        val candidates = launchableApps.filter { app ->
+            app.packageName != context.packageName &&
+                app.label.contains(appPickerQuery, ignoreCase = true) &&
+                appSchedules.none { it.packageName == app.packageName } &&
+                app.packageName !in VaultManager.blockedPackages(context) &&
+                app.packageName !in ControlManager.newlyBlockedPackages(context)
+        }
+        Dialog(
+            onDismissRequest = { showSchedulePicker = false; appPickerQuery = "" },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                    PageHeader(title = "Choose an app", onBack = { showSchedulePicker = false; appPickerQuery = "" })
+                    OutlinedTextField(
+                        value = appPickerQuery,
+                        onValueChange = { appPickerQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(50),
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        placeholder = { Text("Search for apps") }
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    if (candidates.isEmpty()) {
+                        Text("No eligible installed apps found.", color = TextSecondary)
+                    } else {
+                        SettingsCard(modifier = Modifier.weight(1f)) {
+                            LazyColumn {
+                                items(candidates, key = { it.packageName }) { app ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                            showSchedulePicker = false
+                                            appPickerQuery = ""
+                                            scheduleStartInput = "08:00"
+                                            scheduleEndInput = "22:00"
+                                            scheduleEditorApp = app
+                                        }
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        val appIcon by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                                            initialValue = null,
+                                            key1 = app.packageName
+                                        ) {
+                                            value = com.fortress.vault.core.IconCache.getIconAsync(context, app.packageName)
+                                        }
+                                        if (appIcon != null) {
+                                            Image(
+                                                bitmap = appIcon!!,
+                                                contentDescription = app.label,
+                                                modifier = Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
+                                            )
+                                        } else {
+                                            Box(
+                                                Modifier
+                                                    .size(42.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            )
+                                        }
+                                        Spacer(Modifier.width(14.dp))
+                                        Text(
+                                            app.label,
+                                            modifier = Modifier.weight(1f),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = TextPrimary
+                                        )
+                                        Icon(
+                                            Icons.Filled.ChevronRight,
+                                            contentDescription = null,
+                                            tint = TextSecondary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    scheduleEditorApp?.let { app ->
+        val start = parseTimeOfDay(scheduleStartInput)
+        val end = parseTimeOfDay(scheduleEndInput)
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                PageHeader(title = "App schedule", onBack = { scheduleEditorApp = null })
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(app.label, style = MaterialTheme.typography.headlineSmall)
+                    Text("The app will be suspended outside this daily window.", color = TextSecondary)
+                    SettingsCard {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = scheduleStartInput,
+                                    onValueChange = { scheduleStartInput = it },
+                                    label = { Text("Allowed from") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedButton(
+                                    onClick = { showStartTimePicker = true },
+                                    modifier = Modifier.height(56.dp)
+                                ) { Text("Choose") }
+                            }
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = scheduleEndInput,
+                                    onValueChange = { scheduleEndInput = it },
+                                    label = { Text("Allowed until") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedButton(
+                                    onClick = { showEndTimePicker = true },
+                                    modifier = Modifier.height(56.dp)
+                                ) { Text("Choose") }
+                            }
+                        }
+                    }
+                }
+                Button(
+                    enabled = start != null && end != null && start != end,
+                    onClick = {
+                        saveAppSchedule(app.packageName, start!!, end!!)
+                        scheduleEditorApp = null
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrassPrimary)
+                ) { Text("Save schedule", color = MaterialTheme.colorScheme.background) }
+            }
+        }
+    }
+
+    if (showStartTimePicker) {
+        val initial = parseTimeOfDay(scheduleStartInput) ?: 8 * 60
+        val timeState = rememberTimePickerState(
+            initialHour = initial / 60,
+            initialMinute = initial % 60,
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showStartTimePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    scheduleStartInput = "%02d:%02d".format(timeState.hour, timeState.minute)
+                    showStartTimePicker = false
+                }) { Text("Use time") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStartTimePicker = false }) { Text("Cancel") }
+            },
+            title = { Text("Allowed from") },
+            text = { TimePicker(state = timeState) }
+        )
+    }
+
+    if (showEndTimePicker) {
+        val initial = parseTimeOfDay(scheduleEndInput) ?: 22 * 60
+        val timeState = rememberTimePickerState(
+            initialHour = initial / 60,
+            initialMinute = initial % 60,
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showEndTimePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    scheduleEndInput = "%02d:%02d".format(timeState.hour, timeState.minute)
+                    showEndTimePicker = false
+                }) { Text("Use time") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEndTimePicker = false }) { Text("Cancel") }
+            },
+            title = { Text("Allowed until") },
+            text = { TimePicker(state = timeState) }
+        )
     }
 
     limitEditorApp?.let { app ->
@@ -1717,6 +2254,16 @@ private fun WebProtectionDetailsDialog(
             scope = "Selected apps · resets at local midnight",
             note = "Requires Android Usage access and device-owner status. The app remains suspended until the next local day."
         )
+        WebProtectionSetting.APP_SCHEDULE -> WebProtectionDetails(
+            description = "Suspends selected apps outside their configured daily allowed hours.",
+            scope = "Independent per-app schedules",
+            note = "Use the info menu to review details, then lock this feature to prevent schedule or enable-state changes."
+        )
+        WebProtectionSetting.REELS_BLOCKER -> WebProtectionDetails(
+            description = "Uses Accessibility and the overlay permission to detect supported short-video feeds and return the device to Home.",
+            scope = "Instagram · Snapchat · YouTube",
+            note = "Detection depends on app labels and Accessibility content. App updates may require adjustments."
+        )
     }
 
         Surface(
@@ -1901,4 +2448,18 @@ private fun formatLimitDuration(minutes: Int): String {
         remainingMinutes == 0 -> "$hours hr"
         else -> "$hours hr $remainingMinutes min"
     }
+}
+
+private fun formatTimeOfDay(minuteOfDay: Int): String {
+    val hour = minuteOfDay / 60
+    val minute = minuteOfDay % 60
+    return "%02d:%02d".format(hour, minute)
+}
+
+private fun parseTimeOfDay(value: String): Int? {
+    val match = Regex("""^(\d{1,2}):(\d{2})$""").matchEntire(value.trim()) ?: return null
+    val hour = match.groupValues[1].toIntOrNull() ?: return null
+    val minute = match.groupValues[2].toIntOrNull() ?: return null
+    if (hour !in 0..23 || minute !in 0..59) return null
+    return hour * 60 + minute
 }

@@ -742,9 +742,12 @@ object AppRepository {
             val pm = context.packageManager
             val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
             val list = pm.queryIntentActivities(intent, 0)
+                .asSequence()
+                .filter { resolveInfo -> resolveInfo.activityInfo.packageName != context.packageName }
                 .map { resolveInfo ->
-                    val label = resolveInfo.nonLocalizedLabel?.toString()
-                        ?: runCatching { resolveInfo.loadLabel(pm).toString() }.getOrDefault(resolveInfo.activityInfo.packageName)
+                    val label = runCatching {
+                        resolveInfo.loadLabel(pm).toString()
+                    }.getOrDefault(resolveInfo.activityInfo.packageName)
                     InstalledApp(
                         label = label,
                         packageName = resolveInfo.activityInfo.packageName
@@ -753,6 +756,7 @@ object AppRepository {
                 .filter { it.packageName != context.packageName }
                 .distinctBy { it.packageName }
                 .sortedBy { it.label.lowercase() }
+                .toList()
 
             val topPackages = list.take(30).map { it.packageName }
             com.fortress.vault.core.IconCache.preloadIcons(context, topPackages)
