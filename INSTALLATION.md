@@ -124,7 +124,7 @@ app/build/outputs/apk/release/app-release.apk
 ```
 
 ### GitHub Releases & Automated Build
-This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`). When you tag a release (e.g. `git tag v1.2.1 && git push origin v1.2.1`), GitHub Actions will automatically build the release APK and attach `FortressVault-v1.2.1.apk` directly to the GitHub Release page for users to download.
+This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`). When you tag a release (e.g. `git tag v1.3.0 && git push origin v1.3.0`), GitHub Actions will automatically build the release APK and attach `FortressVault-v1.3.0.apk` directly to the GitHub Release page for users to download.
 
 ## Troubleshooting
 
