@@ -178,6 +178,17 @@ object ControlManager {
         if (!PhraseHasher.matches(RecoveryPhraseGenerator.normalize(phrase), target.recoverySalt, target.recoveryHash)) return false
         synchronized(lock) { save(activeLocks(context).filterNot { it.control == control }) }
         if (control == DeviceControl.APP_INSTALLS) {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = FortressAdminReceiver.getComponentName(context)
+            if (dpm.isDeviceOwnerApp(context.packageName)) {
+                runCatching {
+                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_APPS)
+                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_UNINSTALL_APPS)
+                    dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                }.onFailure { error ->
+                    Log.e("ControlManager", "Could not immediately clear install restrictions", error)
+                }
+            }
             val packages = prefs.getStringSet(BLOCKED_NEW_PACKAGES, emptySet()).orEmpty()
             PackageFreezer.unfreezeAll(context, packages - VaultManager.blockedPackages(context))
             prefs.edit()
@@ -249,21 +260,28 @@ object ControlManager {
         val wantsUsbDebugBlock = DeviceControl.USB_DEBUGGING in controls
         val wantsUserAccountsBlock = DeviceControl.USER_ACCOUNTS in controls
 
-        // Compute the desired state and compare with last applied state.
-        // If nothing changed, skip all IPC calls entirely.
+        // Always reconcile the DPM state. A cached in-memory match is not enough:
+        // Android, restoration, or another receiver may have changed restrictions
+        // since the previous apply call.
         val desiredState = AppliedState(wantsUsbDebugBlock, wantsUserAccountsBlock, fullAppChangeBlock, isBlockingAppChanges)
-        val prev = lastAppliedState
-        val stateChanged = prev != desiredState
         val expiredLocks = active.size != allLocks.size
-
-        if (!stateChanged && !expiredLocks) {
-            // No DPM state change needed — skip all IPC calls
-            return true
-        }
 
         var policiesApplied = true
         if (!isBlockingAppChanges && !clearProtectedUninstallPackages(context, dpm, admin)) {
             policiesApplied = false
+        }
+        if (!isBlockingAppChanges) {
+            // Explicitly clear legacy/install restrictions even if Android or an
+            // earlier app version left them applied. This is the single source of
+            // truth for unlocking the APP_INSTALLS control.
+            runCatching {
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_APPS)
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_UNINSTALL_APPS)
+                dpm.clearUserRestriction(admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+            }.onFailure { error ->
+                policiesApplied = false
+                Log.e("ControlManager", "Could not clear legacy install restrictions", error)
+            }
         }
         if (expiredLocks) {
             synchronized(lock) { save(active) }
@@ -307,6 +325,12 @@ object ControlManager {
         policiesApplied = setRestriction(
             dpm, admin, UserManager.DISALLOW_UNINSTALL_APPS, fullAppChangeBlock
         ) && policiesApplied
+        policiesApplied = setRestriction(
+            dpm,
+            admin,
+            UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES,
+            isBlockingAppChanges
+        ) && policiesApplied
         if (isBlockingAppChanges && !fullAppChangeBlock) {
             if (!protectBaselinePackages(context, dpm, admin)) policiesApplied = false
         }
@@ -330,6 +354,10 @@ object ControlManager {
             .forEach { packageName ->
                 try {
                     dpm.setUninstallBlocked(admin, packageName, true)
+                    if (!dpm.isUninstallBlocked(admin, packageName)) {
+                        policiesApplied = false
+                        Log.e("ControlManager", "Android did not confirm uninstall protection for $packageName")
+                    }
                 } catch (error: Exception) {
                     policiesApplied = false
                     Log.e("ControlManager", "Could not block uninstall for $packageName", error)
@@ -352,6 +380,10 @@ object ControlManager {
             .forEach { packageName ->
                 try {
                     dpm.setUninstallBlocked(admin, packageName, false)
+                    if (dpm.isUninstallBlocked(admin, packageName)) {
+                        failedRestores += packageName
+                        Log.e("ControlManager", "Android kept uninstall protection enabled for $packageName")
+                    }
                 } catch (error: Exception) {
                     failedRestores += packageName
                     Log.e("ControlManager", "Could not restore uninstall for $packageName", error)
@@ -398,7 +430,12 @@ object ControlManager {
         return try {
             if (enabled) dpm.addUserRestriction(admin, restriction)
             else dpm.clearUserRestriction(admin, restriction)
-            true
+            val restrictions = dpm.getUserRestrictions(admin)
+            val applied = restrictions.containsKey(restriction) == enabled
+            if (!applied) {
+                Log.e("ControlManager", "Android did not confirm restriction $restriction (enabled=$enabled)")
+            }
+            applied
         } catch (error: Exception) {
             Log.e("ControlManager", "Could not ${if (enabled) "apply" else "clear"} restriction $restriction", error)
             false

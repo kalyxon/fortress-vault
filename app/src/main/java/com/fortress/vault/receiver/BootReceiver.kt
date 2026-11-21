@@ -23,6 +23,7 @@ class BootReceiver : BroadcastReceiver() {
 
         WebProtectionLockManager.reconcileExpired(context)
         WebProtectionManager.apply(context, force = true)
+        ControlManager.apply(context)
         if (!VaultManager.isSealed(context) &&
             ControlManager.activeLocks(context).isEmpty() &&
             WebProtectionLockManager.activeLocks(context).isEmpty() &&

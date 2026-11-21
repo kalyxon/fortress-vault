@@ -576,7 +576,6 @@ object VaultManager {
         if (seals.isEmpty()) {
             dpm.setUninstallBlocked(admin, context.packageName, false)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
             // Release seal-owned restrictions when no seals are active.
             setUserControlDisabledPackages(context, dpm, admin, emptyList())
             return
@@ -584,7 +583,6 @@ object VaultManager {
 
         dpm.setUninstallBlocked(admin, context.packageName, true)
         dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
-        dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
         setUserControlDisabledPackages(
             context,
             dpm,
@@ -600,7 +598,6 @@ object VaultManager {
         if (dpm.isDeviceOwnerApp(context.packageName)) {
             dpm.setUninstallBlocked(admin, context.packageName, false)
             dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_SAFE_BOOT)
-            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
             setUserControlDisabledPackages(context, dpm, admin, emptyList())
         }
     }
