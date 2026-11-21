@@ -104,6 +104,12 @@ object WebProtectionManager {
                 .getStringSet(KEY_MANAGED_BYPASS_PACKAGES, emptySet())
                 .orEmpty()
 
+    fun isChromeOnlyBlockedPackage(context: Context, packageName: String): Boolean =
+        blockBypassApps(context) &&
+            packageName != CHROME_PACKAGE &&
+            (packageName in bypassPackages ||
+                runCatching { packageName in installedBrowserPackages(context) }.getOrDefault(false))
+
     fun adultDomainBlockCount(context: Context): Int =
         adultBlockedDomains(context).size
 
@@ -382,7 +388,12 @@ object WebProtectionManager {
                         previouslyHidden += packageName
                     }
                     if (dpm.setApplicationHidden(admin, packageName, true)) {
-                        managed += packageName
+                        if (dpm.isApplicationHidden(admin, packageName)) {
+                            managed += packageName
+                        } else {
+                            applicationsApplied = false
+                            Log.e(TAG, "Android did not confirm hidden state for bypass app $packageName")
+                        }
                     } else {
                         applicationsApplied = false
                         Log.e(TAG, "Android refused to hide bypass app $packageName")
@@ -425,10 +436,18 @@ object WebProtectionManager {
 
     private fun installedBrowserPackages(context: Context): Set<String> {
         return try {
-            val browserIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_BROWSER)
-            context.packageManager.queryIntentActivities(browserIntent, PackageManager.MATCH_ALL)
-                .mapNotNull { it.activityInfo?.packageName }
-                .toSet()
+            buildSet {
+                val browserIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_BROWSER)
+                context.packageManager.queryIntentActivities(browserIntent, PackageManager.MATCH_ALL)
+                    .mapNotNullTo(this) { it.activityInfo?.packageName }
+
+                val webIntent = Intent(Intent.ACTION_VIEW).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                    data = android.net.Uri.parse("https://fortress.local/")
+                }
+                context.packageManager.queryIntentActivities(webIntent, PackageManager.MATCH_ALL)
+                    .mapNotNullTo(this) { it.activityInfo?.packageName }
+            } - CHROME_PACKAGE
         } catch (error: Exception) {
             Log.e(TAG, "Could not identify installed browser apps", error)
             throw error

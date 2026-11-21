@@ -7,6 +7,7 @@ import com.fortress.vault.core.PackageFreezer
 import com.fortress.vault.core.VaultManager
 import com.fortress.vault.core.ControlManager
 import com.fortress.vault.core.DeviceControl
+import com.fortress.vault.core.WebProtectionManager
 
 class PackageChangeReinforceWorker(
     context: Context,
@@ -15,6 +16,13 @@ class PackageChangeReinforceWorker(
 
     override suspend fun doWork(): Result {
         val packageName = inputData.getString(KEY_PACKAGE) ?: return Result.success()
+        if (packageName == "com.android.chrome" || WebProtectionManager.isWebFilteringActive(applicationContext)) {
+            WebProtectionManager.apply(applicationContext, force = true)
+        }
+        if (WebProtectionManager.isChromeOnlyBlockedPackage(applicationContext, packageName)) {
+            PackageFreezer.quarantineNewPackage(applicationContext, packageName)
+            PackageFreezer.uninstallNewPackage(applicationContext, packageName)
+        }
         val appChangesBlocked = ControlManager.activeLocks(applicationContext).any {
             it.control == DeviceControl.APP_INSTALLS && ControlManager.remainingMillis(applicationContext, it) > 0
         }
