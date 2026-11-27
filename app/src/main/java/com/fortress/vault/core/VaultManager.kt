@@ -153,6 +153,26 @@ object VaultManager {
     fun remainingLabelFor(context: Context, seal: Seal): String =
         formatRemaining(seal.unlockAtMillis - TimeKeeper.estimateCurrentTrustedTimeMillis(context))
 
+    fun renameSeal(context: Context, sealId: String, name: String) {
+        init(context)
+        val normalizedName = name.trim()
+        require(normalizedName.length <= MAX_SEAL_NAME_LENGTH) {
+            "Seal names must be $MAX_SEAL_NAME_LENGTH characters or fewer."
+        }
+        require(normalizedName.none { Character.isISOControl(it) }) {
+            "Seal names cannot contain control characters."
+        }
+        synchronized(lock) {
+            val seals = activeSeals(context)
+            val target = seals.firstOrNull { it.id == sealId }
+                ?: throw IllegalArgumentException("This seal is no longer active.")
+            if (target.name == normalizedName) return
+            saveSeals(context, seals.map {
+                if (it.id == sealId) it.copy(name = normalizedName) else it
+            })
+        }
+    }
+
     private fun formatRemaining(remainingMillisRaw: Long): String {
         val remainingMillis = remainingMillisRaw.coerceAtLeast(0)
         val days = TimeUnit.MILLISECONDS.toDays(remainingMillis)
@@ -322,14 +342,13 @@ object VaultManager {
             val normalized = websiteDomains.mapValues { (_, domains) ->
                 domains.map(::normalizeWebsiteDomain).toSet()
             }.filterValues { it.isNotEmpty() }
-            val lockedDomains = target.websiteDomains.mapValues { (packageName, domains) ->
-                domains + normalized[packageName].orEmpty()
-            }.toMutableMap()
-            normalized.forEach { (packageName, domains) ->
-                lockedDomains[packageName] = lockedDomains[packageName].orEmpty() + domains
+            check(target.websiteDomains.all { (packageName, domains) ->
+                normalized[packageName].orEmpty().containsAll(domains)
+            }) {
+                "Website rules cannot be removed until this seal ends."
             }
             saveSeals(context, seals.map {
-                if (it.id == sealId) it.copy(websiteDomains = lockedDomains) else it
+                if (it.id == sealId) it.copy(websiteDomains = normalized) else it
             })
             if (!WebProtectionManager.applyChromeWebsitePolicy(context)) {
                 throw IllegalStateException(

@@ -3,6 +3,8 @@ package com.fortress.vault.core
 import org.json.JSONArray
 import org.json.JSONObject
 
+const val MAX_SEAL_NAME_LENGTH = 24
+
 data class Seal(
     val id: String,
     val packages: Set<String>,
@@ -20,7 +22,8 @@ data class Seal(
     /** True while user-switching is restricted for this seal's lifetime. */
     val blockUserSwitch: Boolean = false,
     /** Domains to block in Chrome, associated with each app in this seal. */
-    val websiteDomains: Map<String, Set<String>> = emptyMap()
+    val websiteDomains: Map<String, Set<String>> = emptyMap(),
+    val name: String = ""
 )
 
 object SealCodec {
@@ -52,6 +55,7 @@ object SealCodec {
         put("cooldownUntil", seal.cooldownUntilMillis)
         put("lastPenaltyAt", seal.lastPenaltyAtMillis)
         put("blockUserSwitch", seal.blockUserSwitch)
+        put("name", seal.name)
         put("websiteDomains", JSONObject().apply {
             seal.websiteDomains.forEach { (packageName, domains) ->
                 put(packageName, JSONArray(domains.toList()))
@@ -86,6 +90,7 @@ object SealCodec {
             cooldownUntilMillis = obj.optLong("cooldownUntil", 0L),
             lastPenaltyAtMillis = obj.optLong("lastPenaltyAt", 0L),
             blockUserSwitch = obj.optBoolean("blockUserSwitch", false),
+            name = obj.optString("name", ""),
             websiteDomains = websiteDomains
         )
     }
