@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.foundation.shape.CircleShape
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.*
@@ -40,10 +41,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.fortress.vault.core.MAX_SEAL_DURATION_DAYS
+import com.fortress.vault.core.MAX_SEAL_NAME_LENGTH
 import com.fortress.vault.core.MIN_SEAL_DURATION_DAYS
 import com.fortress.vault.core.Seal
 import com.fortress.vault.core.VaultManager
@@ -73,6 +76,7 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
     var seals by remember { mutableStateOf(VaultManager.activeSeals(context)) }
     var extendTargetSealId by remember { mutableStateOf<String?>(null) }
     var detailsSealId by remember { mutableStateOf<String?>(null) }
+    var renameTargetSealId by remember { mutableStateOf<String?>(null) }
     var websiteRulesTargetSealId by remember { mutableStateOf<String?>(null) }
     var addAppsTargetSealId by remember { mutableStateOf<String?>(null) }
     var pendingAddedApps by remember { mutableStateOf<Pair<String, Set<String>>?>(null) }
@@ -121,6 +125,7 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
             onDismiss = { detailsSealId = null },
             onAddApps = { addAppsTargetSealId = detailsSeal.id },
             onExtend = { extendTargetSealId = detailsSeal.id },
+            onRename = { renameTargetSealId = detailsSeal.id },
             onEmergencyUnlock = { onEmergencyUnlock(detailsSeal.id) },
             onEditWebsites = {
                 websiteRulesTargetSealId = detailsSeal.id
@@ -251,6 +256,27 @@ fun HomeScreen(onSealVault: () -> Unit, onEmergencyUnlock: (String) -> Unit, onS
         )
     }
 
+    val renameTargetSeal = seals.firstOrNull { it.id == renameTargetSealId }
+    if (renameTargetSeal != null) {
+        RenameSealDialog(
+            seal = renameTargetSeal,
+            onDismiss = { renameTargetSealId = null },
+            onSave = { name, onComplete ->
+                coroutineScope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            VaultManager.renameSeal(context, renameTargetSeal.id, name)
+                        }
+                        seals = withContext(Dispatchers.IO) { VaultManager.activeSeals(context) }
+                        onComplete(null)
+                    } catch (error: Exception) {
+                        onComplete(error.message ?: "Could not rename this seal.")
+                    }
+                }
+            }
+        )
+    }
+
     val addAppsTarget = addAppsTargetSealId
     if (addAppsTarget != null) {
         AddAppsToSealDialog(
@@ -341,67 +367,83 @@ private fun SealCard(
                 )
             }
             Spacer(Modifier.height(12.dp))
-            AnimatedContent(
-                targetState = remainingLabel,
-                transitionSpec = {
-                    fadeIn(tween(120)) togetherWith fadeOut(tween(80))
-                },
-                label = "seal-countdown"
-            ) { label ->
-                val parts = label.split(" ")
-                Row(verticalAlignment = Alignment.Bottom) {
-                    if (parts.size >= 2 && parts[0].endsWith("d") && parts[1].endsWith("h")) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AnimatedContent(
+                    modifier = Modifier.weight(1f),
+                    targetState = seal.name.ifBlank { remainingLabel },
+                    transitionSpec = {
+                        fadeIn(tween(120)) togetherWith fadeOut(tween(80))
+                    },
+                    label = "seal-card-label"
+                ) { label ->
+                    if (seal.name.isNotBlank()) {
                         Text(
-                            parts[0].removeSuffix("d"),
-                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
-                            color = TextPrimary
-                        )
-                        Text(
-                            "d",
-                            style = MaterialTheme.typography.titleMedium,
+                            label,
+                            style = MaterialTheme.typography.headlineSmall.copy(fontSize = 28.sp),
                             color = TextPrimary,
-                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp, end = 12.dp)
-                        )
-                        Text(
-                            parts[1].removeSuffix("h").removeSuffix("m"),
-                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
-                            color = TextPrimary
-                        )
-                        Text(
-                            if (parts[1].endsWith("h")) "h" else "m",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary,
-                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp)
-                        )
-                    } else if (parts.size >= 2 && parts[0].endsWith("h") && parts[1].endsWith("m")) {
-                        Text(
-                            parts[0].removeSuffix("h"),
-                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
-                            color = TextPrimary
-                        )
-                        Text(
-                            "h",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary,
-                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp, end = 12.dp)
-                        )
-                        Text(
-                            parts[1].removeSuffix("m"),
-                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
-                            color = TextPrimary
-                        )
-                        Text(
-                            "m",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary,
-                            modifier = Modifier.padding(start = 5.dp, bottom = 7.dp)
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     } else {
-                        Text(
-                            parts.firstOrNull().orEmpty(),
-                            style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
-                            color = TextPrimary
-                        )
+                        val parts = label.split(" ")
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            if (parts.size >= 2 && parts[0].endsWith("d") && parts[1].endsWith("h")) {
+                                Text(
+                                    parts[0].removeSuffix("d"),
+                                    style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    "d",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary,
+                                    modifier = Modifier.padding(start = 5.dp, bottom = 7.dp, end = 12.dp)
+                                )
+                                Text(
+                                    parts[1].removeSuffix("h").removeSuffix("m"),
+                                    style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    if (parts[1].endsWith("h")) "h" else "m",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary,
+                                    modifier = Modifier.padding(start = 5.dp, bottom = 7.dp)
+                                )
+                            } else if (parts.size >= 2 && parts[0].endsWith("h") && parts[1].endsWith("m")) {
+                                Text(
+                                    parts[0].removeSuffix("h"),
+                                    style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    "h",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary,
+                                    modifier = Modifier.padding(start = 5.dp, bottom = 7.dp, end = 12.dp)
+                                )
+                                Text(
+                                    parts[1].removeSuffix("m"),
+                                    style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    "m",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary,
+                                    modifier = Modifier.padding(start = 5.dp, bottom = 7.dp)
+                                )
+                            } else {
+                                Text(
+                                    parts.firstOrNull().orEmpty(),
+                                    style = CountdownStyle.copy(fontSize = 44.sp, letterSpacing = 0.sp),
+                                    color = TextPrimary
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -419,6 +461,67 @@ private fun SealCard(
     }
 }
 
+@Composable
+private fun RenameSealDialog(
+    seal: Seal,
+    onDismiss: () -> Unit,
+    onSave: (String, (String?) -> Unit) -> Unit
+) {
+    var name by remember(seal.id) { mutableStateOf(seal.name) }
+    var saving by remember(seal.id) { mutableStateOf(false) }
+    var errorMessage by remember(seal.id) { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("Change seal card text") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "This replaces the countdown on the card. Leave it blank to show the timer again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        if (it.length <= MAX_SEAL_NAME_LENGTH) {
+                            name = it
+                            errorMessage = null
+                        }
+                    },
+                    label = { Text("Card text") },
+                    placeholder = { Text("e.g. Social Media") },
+                    singleLine = true,
+                    supportingText = { Text("${name.length}/$MAX_SEAL_NAME_LENGTH") },
+                    isError = errorMessage != null
+                )
+                errorMessage?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !saving && name.trim() != seal.name,
+                onClick = {
+                    saving = true
+                    onSave(name) { error ->
+                        saving = false
+                        if (error == null) onDismiss() else errorMessage = error
+                    }
+                }
+            ) {
+                Text(if (saving) "Saving..." else "Save")
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !saving, onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 private data class PackageEntry(val packageName: String, val label: String)
 
 @Composable
@@ -428,6 +531,7 @@ private fun SealDetailsScreen(
     onDismiss: () -> Unit,
     onAddApps: () -> Unit,
     onExtend: () -> Unit,
+    onRename: () -> Unit,
     onEmergencyUnlock: () -> Unit,
     onEditWebsites: () -> Unit
 ) {
@@ -468,8 +572,14 @@ private fun SealDetailsScreen(
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to seals")
                 }
-                Column {
-                    Text("Seal", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Seal",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     Text(sealShortId(seal.id), style = MaterialTheme.typography.labelMedium, color = TextSecondary)
                 }
             }
@@ -483,8 +593,20 @@ private fun SealDetailsScreen(
                     Icon(Icons.Filled.Add, contentDescription = "Add apps")
                 }
                 Spacer(Modifier.weight(1f))
+                IconButton(onClick = onRename) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = "Change seal card text",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
                 IconButton(onClick = onExtend) {
-                    Icon(Icons.Filled.Timer, contentDescription = "Add time")
+                    Icon(
+                        Icons.Filled.Timer,
+                        contentDescription = "Add time",
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
                 IconButton(onClick = onEmergencyUnlock) {
                     Icon(Icons.Filled.LockOpen, contentDescription = "Emergency unlock", tint = EmberRed)
@@ -639,7 +761,7 @@ private fun WebsiteDomainsDialog(
                     WebsiteDomainsEditor(
                         apps = apps.map { it.packageName to it.label },
                         websiteDomains = domains,
-                        allowRemove = true,
+                        allowRemove = false,
                         onDomainsChanged = { domains = it }
                     )
                 }
