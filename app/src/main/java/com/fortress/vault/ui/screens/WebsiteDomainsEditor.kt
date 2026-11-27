@@ -1,6 +1,7 @@
 package com.fortress.vault.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
@@ -67,7 +68,23 @@ fun WebsiteDomainsEditor(
                     errors[packageName]?.let {
                         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     }
-                    websiteDomains[packageName].orEmpty().sorted().forEach { domain ->
+                    val savedDomains = websiteDomains[packageName].orEmpty().sorted()
+                    if (savedDomains.isEmpty()) {
+                        Text(
+                            "No domains added yet.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    } else {
+                        Text(
+                            "Blocked domains · ${savedDomains.size}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                    savedDomains.forEach { domain ->
                         if (allowRemove) {
                             AssistChip(
                                 onClick = {
@@ -83,12 +100,25 @@ fun WebsiteDomainsEditor(
                                 }
                             )
                         } else {
-                            Text(
-                                domain,
-                                modifier = Modifier.padding(vertical = 6.dp),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.padding(vertical = 3.dp)
+                            ) {
+                                Text(
+                                    domain,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                )
+                            }
                         }
+                    }
+                    if (!allowRemove) {
+                        Text(
+                            "Saved domains stay blocked until this seal ends.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
                     }
                 }
             }

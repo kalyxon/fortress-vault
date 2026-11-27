@@ -113,17 +113,10 @@ object WebProtectionManager {
     fun adultDomainBlockCount(context: Context): Int =
         adultBlockedDomains(context).size
 
-    fun adultDomainsForEditing(context: Context): Set<String> {
-        check(!WebProtectionLockManager.isLocked(context, WebProtectionSetting.ADULT_SITES)) {
-            "Unlock adult-site protection with its recovery phrase before viewing or editing Chrome domain blocks."
-        }
-        return adultBlockedDomains(context)
-    }
+    fun adultDomainsForEditing(context: Context): Set<String> =
+        adultBlockedDomains(context)
 
     fun updateAdultDomainBlocks(context: Context, domains: Set<String>) {
-        check(!WebProtectionLockManager.isLocked(context, WebProtectionSetting.ADULT_SITES)) {
-            "Unlock adult-site protection with its recovery phrase before viewing or editing Chrome domain blocks."
-        }
         val dpm = context.getSystemService(DevicePolicyManager::class.java)
         check(dpm.isDeviceOwnerApp(context.packageName)) {
             "Set Fortress Vault as the device owner before editing Chrome domain blocks."
@@ -140,6 +133,11 @@ object WebProtectionManager {
         }
         val normalized = domains.map(::normalizeWebsiteDomain).toSet()
         val previous = adultBlockedDomains(context)
+        if (WebProtectionLockManager.isLocked(context, WebProtectionSetting.ADULT_SITES)) {
+            check(normalized.containsAll(previous)) {
+                "Custom domains cannot be removed while adult-site protection is locked."
+            }
+        }
         if (normalized == previous) return
         saveAdultBlockedDomains(context, normalized)
         if (applyChromeWebsitePolicy(context, force = true)) {

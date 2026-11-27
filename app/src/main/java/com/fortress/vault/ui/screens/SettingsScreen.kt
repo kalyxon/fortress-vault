@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
@@ -51,6 +52,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.fortress.vault.core.ControlManager
 import com.fortress.vault.core.AppTimeLimitManager
 import com.fortress.vault.core.AppSchedule
@@ -84,6 +87,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private data class LoadedWebSettings(
@@ -1416,7 +1422,7 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
             WebProtectionSetting.APP_SCHEDULE -> appScheduleEnabled
             WebProtectionSetting.REELS_BLOCKER -> reelsBlockerEnabled
         },
-        locked = setting in webLocks,
+        lock = webLocks[setting],
         controlsEnabled = isDeviceOwner && webLocksLoaded && !webProtectionBusy,
         busy = webProtectionBusy || adultDomainBusy,
         onDismiss = { webDetailsTarget = null },
@@ -1495,10 +1501,17 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Text(
-                        "Add domains that should be blocked in managed Chrome while protection is on.",
+                        "Add domains to block in managed Chrome while adult-site protection is on.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary
                     )
+                    webLocks[WebProtectionSetting.ADULT_SITES]?.let {
+                        Text(
+                            "Locked. You can add domains, but cannot remove them until unlocked.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = adultDomainInput,
@@ -1521,7 +1534,7 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                     SettingsCard {
                         Column {
                             Text(
-                                "Saved domains",
+                                "Saved domains · ${pendingAdultDomains.size}",
                                 style = MaterialTheme.typography.titleMedium,
                                 modifier = Modifier.padding(16.dp)
                             )
@@ -1540,11 +1553,13 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(domain, style = MaterialTheme.typography.bodyLarge)
-                                        TextButton(
-                                            enabled = !adultDomainBusy,
-                                            onClick = { pendingAdultDomains = pendingAdultDomains - domain }
-                                        ) {
-                                            Text("Remove")
+                                        if (WebProtectionSetting.ADULT_SITES !in webLocks) {
+                                            TextButton(
+                                                enabled = !adultDomainBusy,
+                                                onClick = { pendingAdultDomains = pendingAdultDomains - domain }
+                                            ) {
+                                                Text("Remove")
+                                            }
                                         }
                                     }
                                 }
@@ -1592,7 +1607,11 @@ private fun SettingsDetailScreen(section: SettingsSection, onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        "Only the recovery phrase can prevent later editing while the feature is locked.",
+                        if (WebProtectionSetting.ADULT_SITES in webLocks) {
+                            "Existing domains stay in place while this protection is locked. New domains can still be added."
+                        } else {
+                            "Lock adult-site protection with a recovery key to prevent removing these domains."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary
                     )
@@ -2219,7 +2238,7 @@ private fun WebProtectionSettingCard(
 private fun WebProtectionDetailsDialog(
     setting: WebProtectionSetting,
     enabled: Boolean,
-    locked: Boolean,
+    lock: WebProtectionLock?,
     controlsEnabled: Boolean,
     busy: Boolean,
     onDismiss: () -> Unit,
@@ -2228,6 +2247,25 @@ private fun WebProtectionDetailsDialog(
     onUnlock: () -> Unit
 ) {
     var showInfo by remember { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) showInfo = false
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val context = LocalContext.current
+    var trustedNow by remember(lock?.unlockAtMillis) {
+        mutableLongStateOf(TimeKeeper.estimateCurrentTrustedTimeMillis(context))
+    }
+    LaunchedEffect(showInfo, lock?.unlockAtMillis) {
+        while (showInfo && lock != null && lock.unlockAtMillis > 0L) {
+            trustedNow = TimeKeeper.estimateCurrentTrustedTimeMillis(context)
+            delay(60_000)
+        }
+    }
+    val locked = lock != null
     val details = when (setting) {
         WebProtectionSetting.ADULT_SITES -> WebProtectionDetails(
             description = "Uses Android Private DNS to filter adult domains across the device. Chrome also uses SafeSearch and has secure DNS disabled.",
@@ -2304,12 +2342,37 @@ private fun WebProtectionDetailsDialog(
                                     modifier = Modifier.widthIn(max = 300.dp)
                                 ) {
                                     Surface(color = SteelSurfaceHigh) {
-                                        Text(
-                                            details.description,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = TextSecondary,
-                                            modifier = Modifier.padding(16.dp)
-                                        )
+                                        Column(
+                                            modifier = Modifier.padding(16.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                details.description,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = TextSecondary
+                                            )
+                                            lock?.let {
+                                                HorizontalDivider(color = VaultDivider)
+                                                if (it.unlockAtMillis == 0L) {
+                                                    Text(
+                                                        "This lock has no scheduled expiry.",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = TextSecondary
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        "Unlocks ${formatWebLockExpiry(it.unlockAtMillis)}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = TextPrimary
+                                                    )
+                                                    Text(
+                                                        "${formatWebLockRemaining(it.unlockAtMillis - trustedNow)} remaining",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = BrassPrimary
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -2320,7 +2383,7 @@ private fun WebProtectionDetailsDialog(
                     if (setting == WebProtectionSetting.ADULT_SITES) {
                         SettingsCard(
                             modifier = Modifier
-                                .clickable(enabled = !locked && controlsEnabled && !busy) {
+                                .clickable(enabled = controlsEnabled && !busy) {
                                     onManageDomains()
                                 }
                         ) {
@@ -2341,14 +2404,19 @@ private fun WebProtectionDetailsDialog(
                                             style = MaterialTheme.typography.bodyLarge,
                                             fontWeight = FontWeight.SemiBold
                                         )
+                                        if (locked) {
+                                            Text(
+                                                "Editable while protection is locked",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = TextSecondary
+                                            )
+                                        }
                                     }
-                                    if (!locked) {
-                                        Icon(
-                                            Icons.Filled.ChevronRight,
-                                            contentDescription = "Open custom Chrome blocks",
-                                            tint = TextSecondary
-                                        )
-                                    }
+                                    Icon(
+                                        Icons.Filled.ChevronRight,
+                                        contentDescription = "Open custom Chrome blocks",
+                                        tint = TextSecondary
+                                    )
                                 }
                         }
                     }
@@ -2462,4 +2530,21 @@ private fun parseTimeOfDay(value: String): Int? {
     val minute = match.groupValues[2].toIntOrNull() ?: return null
     if (hour !in 0..23 || minute !in 0..59) return null
     return hour * 60 + minute
+}
+
+private fun formatWebLockExpiry(unlockAtMillis: Long): String =
+    SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(unlockAtMillis))
+
+private fun formatWebLockRemaining(remainingMillis: Long): String {
+    val remainingMinutes = TimeUnit.MILLISECONDS.toMinutes(remainingMillis.coerceAtLeast(0))
+    val days = remainingMinutes / (24 * 60)
+    val hours = (remainingMinutes % (24 * 60)) / 60
+    val minutes = remainingMinutes % 60
+    return when {
+        remainingMillis <= 0L -> "less than a minute"
+        remainingMinutes == 0L -> "less than a minute"
+        days > 0 -> "$days day${if (days == 1L) "" else "s"}${if (hours > 0) ", $hours hr" else ""}"
+        hours > 0 -> "$hours hr${if (minutes > 0) ", $minutes min" else ""}"
+        else -> "$minutes min"
+    }
 }
